@@ -265,18 +265,20 @@ impl App {
             // ——— auto‑drain incoming messages in Chat phase ———
             if self.phase == Phase::Chat {
                 if let Some(handler) = &mut self.handler {
-                    let incoming = handler.drain_incoming().await;
-                    for (from, text) in incoming {
-                        if let Some(chat) = self.screen.as_chat_mut() {
-                            let idx = match chat.contacts.iter().position(|c| c.id == from) {
-                                Some(i) => i,
-                                None => {
-                                    chat.contacts.push(Contact::new(&from));
-                                    chat.messages.push(Vec::new());
-                                    chat.contacts.len() - 1
-                                }
-                            };
-                            chat.messages[idx].push(Message::new(&from, &text));
+                    while let Ok(incoming_msg) = handler.incoming_rx.try_recv() {
+                        let msgs = handler.process_received_message(incoming_msg).await;
+                        for (from, text) in msgs {
+                            if let Some(chat) = self.screen.as_chat_mut() {
+                                let idx = match chat.contacts.iter().position(|c| c.id == from) {
+                                    Some(i) => i,
+                                    None => {
+                                        chat.contacts.push(Contact::new(&from));
+                                        chat.messages.push(Vec::new());
+                                        chat.contacts.len() - 1
+                                    }
+                                };
+                                chat.messages[idx].push(Message::new(&from, &text));
+                            }
                         }
                     }
                 }
@@ -435,11 +437,15 @@ impl App {
                         Phase::Chat => {
                             // 1) Drain incoming messages
                             if let Some(handler) = &mut self.handler {
-                                let incoming = handler.drain_incoming().await;
-                                for (from, text) in incoming {
-                                    if let Some(chat) = self.screen.as_chat_mut() {
-                                        let idx =
-                                            match chat.contacts.iter().position(|c| c.id == from) {
+                                while let Ok(incoming_msg) = handler.incoming_rx.try_recv() {
+                                    let msgs = handler.process_received_message(incoming_msg).await;
+                                    for (from, text) in msgs {
+                                        if let Some(chat) = self.screen.as_chat_mut() {
+                                            let idx = match chat
+                                                .contacts
+                                                .iter()
+                                                .position(|c| c.id == from)
+                                            {
                                                 Some(i) => i,
                                                 None => {
                                                     chat.contacts.push(Contact::new(&from));
@@ -447,7 +453,8 @@ impl App {
                                                     chat.contacts.len() - 1
                                                 }
                                             };
-                                        chat.messages[idx].push(Message::new(&from, &text));
+                                            chat.messages[idx].push(Message::new(&from, &text));
+                                        }
                                     }
                                 }
                             }

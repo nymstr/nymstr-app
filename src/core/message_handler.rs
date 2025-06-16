@@ -1,9 +1,9 @@
 //! High-level handler for user registration, login, messaging, and queries
 #![allow(dead_code)]
-use crate::core::crypto::Crypto;
+use crate::core::crypto::{Crypto, Encrypted};
 use crate::core::db::Db;
 use crate::core::mixnet_client::{Incoming, MixnetService};
-use anyhow::anyhow;
+use anyhow::{Result, anyhow};
 use chrono::Utc;
 use hex;
 use serde_json::{Value, json};
@@ -67,38 +67,20 @@ impl MessageHandler {
         // Await server challenge and responses
         while let Some(incoming) = self.incoming_rx.recv().await {
             let env = incoming.envelope;
-            // Handle challenge to sign
-            if env.action == "challenge" && env.context.as_deref() == Some("registration") {
-                if let Some(content) = env.content {
-                    if let Ok(v) = serde_json::from_str::<Value>(&content) {
-                        if let Some(nonce) = v.get("nonce").and_then(|n| n.as_str()) {
-                            let sk = self.private_key.as_ref().unwrap();
-                            let sig_bytes = Crypto::sign(sk, nonce.as_bytes())?;
-                            let signature = hex::encode(&sig_bytes);
-                            self.service
-                                .send_registration_response(username, &signature)
-                                .await?;
-                        }
+            let action = env.action.as_str();
+            let ctx = env.context.as_deref();
+            match (action, ctx) {
+                ("challenge", Some("registration")) => {
+                    if let Some(content) = env.content.as_deref() {
+                        self.process_register_challenge(username, content).await?;
                     }
                 }
-            }
-            // Final challenge response from server
-            else if env.action == "challengeResponse"
-                && env.context.as_deref() == Some("registration")
-            {
-                if let Some(result) = env.content {
-                    if result == "success" {
-                        // Save key files and create per-user tables
-                        let sk = self.private_key.as_ref().unwrap();
-                        let pk = self.public_key.as_ref().unwrap();
-                        self.crypto.save_keys("storage", username, sk, pk)?;
-                        self.db.init_user(username).await?;
-                        self.current_user = Some(username.to_string());
-                        return Ok(true);
-                    } else {
-                        return Ok(false);
+                ("challengeResponse", Some("registration")) => {
+                    if let Some(result) = env.content.as_deref() {
+                        return self.process_register_response(username, result).await;
                     }
                 }
+                _ => {}
             }
         }
         Ok(false)
@@ -121,32 +103,20 @@ impl MessageHandler {
         // Await server challenge and responses
         while let Some(incoming) = self.incoming_rx.recv().await {
             let env = incoming.envelope;
-            // Handle login challenge (nonce signing)
-            if env.action == "challenge" && env.context.as_deref() == Some("login") {
-                if let Some(content) = env.content {
-                    if let Ok(v) = serde_json::from_str::<Value>(&content) {
-                        if let Some(nonce) = v.get("nonce").and_then(|n| n.as_str()) {
-                            let sk = self.private_key.as_ref().unwrap();
-                            let sig_bytes = Crypto::sign(sk, nonce.as_bytes())?;
-                            let signature = hex::encode(&sig_bytes);
-                            self.service
-                                .send_login_response(username, &signature)
-                                .await?;
-                        }
+            let action = env.action.as_str();
+            let ctx = env.context.as_deref();
+            match (action, ctx) {
+                ("challenge", Some("login")) => {
+                    if let Some(content) = env.content.as_deref() {
+                        self.process_login_challenge(content).await?;
                     }
                 }
-            }
-            // Handle final login response
-            else if env.action == "challengeResponse" && env.context.as_deref() == Some("login") {
-                if let Some(result) = env.content {
-                    if result == "success" {
-                        self.db.init_user(username).await?;
-                        self.current_user = Some(username.to_string());
-                        return Ok(true);
-                    } else {
-                        return Ok(false);
+                ("challengeResponse", Some("login")) => {
+                    if let Some(result) = env.content.as_deref() {
+                        return self.process_login_response(username, result).await;
                     }
                 }
+                _ => {}
             }
         }
         Ok(false)
@@ -159,23 +129,27 @@ impl MessageHandler {
         // Await server's query response
         while let Some(incoming) = self.incoming_rx.recv().await {
             let env = incoming.envelope;
-            if env.action == "queryResponse" && env.context.as_deref() == Some("query") {
-                if let Some(content) = env.content {
-                    if let Ok(v) = serde_json::from_str::<Value>(&content) {
-                        if let (Some(user), Some(pk)) = (
-                            v.get("username").and_then(|u| u.as_str()),
-                            v.get("publicKey").and_then(|k| k.as_str()),
-                        ) {
-                            let res = (user.to_string(), pk.to_string());
-                            // Persist contact
-                            if let Some(me) = &self.current_user {
-                                let _ = self.db.add_contact(me, user, pk).await;
+            let action = env.action.as_str();
+            let ctx = env.context.as_deref();
+            match (action, ctx) {
+                ("queryResponse", Some("query")) => {
+                    if let Some(content) = env.content {
+                        if let Ok(v) = serde_json::from_str::<Value>(&content) {
+                            if let (Some(user), Some(pk)) = (
+                                v.get("username").and_then(|u| u.as_str()),
+                                v.get("publicKey").and_then(|k| k.as_str()),
+                            ) {
+                                let res = (user.to_string(), pk.to_string());
+                                if let Some(me) = &self.current_user {
+                                    let _ = self.db.add_contact(me, user, pk).await;
+                                }
+                                return Ok(Some(res));
                             }
-                            return Ok(Some(res));
                         }
                     }
+                    return Ok(None);
                 }
-                return Ok(None);
+                _ => {}
             }
         }
         Ok(None)
@@ -308,105 +282,168 @@ impl MessageHandler {
         Ok(())
     }
 
-    /// Drain incoming chat messages: returns Vec of (from, content)
-    pub async fn drain_incoming(&mut self) -> Vec<(String, String)> {
-        let mut msgs = Vec::new();
-        while let Ok(incoming) = self.incoming_rx.try_recv() {
-            let env = incoming.envelope;
-            if env.action == "incomingMessage" && env.context.as_deref() == Some("chat") {
-                if let Some(content_str) = env.content {
-                    if let Ok(payload) = serde_json::from_str::<Value>(&content_str) {
-                        if let (Some(sender), Some(body)) = (
-                            payload.get("sender").and_then(|v| v.as_str()),
-                            payload.get("body"),
-                        ) {
-                            // Body should have encryptedPayload and payloadSignature
-                            if let (Some(enc_val), Some(sig_val)) = (
-                                body.get("encryptedPayload"),
-                                body.get("payloadSignature").and_then(|v| v.as_str()),
-                            ) {
-                                // Deserialize encrypted payload
-                                if let Ok(enc) = serde_json::from_value::<
-                                    crate::core::crypto::Encrypted,
-                                >(enc_val.clone())
-                                {
-                                    // Verify inner signature
-                                    if let Ok(Some((_, pk))) = self
-                                        .db
-                                        .get_contact(
-                                            self.current_user.as_deref().unwrap_or(""),
-                                            sender,
-                                        )
-                                        .await
-                                    {
-                                        let pk_bytes = pk.as_bytes();
-                                        if Crypto::verify(
-                                            pk_bytes,
-                                            enc_val.to_string().as_bytes(),
-                                            &hex::decode(sig_val).unwrap_or_default(),
-                                        ) {
-                                            // Decrypt
-                                            if let Some(sk_pem) = self.private_key.as_ref() {
-                                                if let Ok(decrypted) = Crypto::decrypt(sk_pem, &enc)
-                                                {
-                                                    if let Ok(text) = String::from_utf8(decrypted) {
-                                                        if let Ok(obj) =
-                                                            serde_json::from_str::<Value>(&text)
-                                                        {
-                                                            if let Some(msg_type) = obj
-                                                                .get("type")
-                                                                .and_then(|v| v.as_i64())
-                                                            {
-                                                                if msg_type == 1 {
-                                                                    if let Some(addr) = obj
-                                                                        .get("message")
-                                                                        .and_then(|v| v.as_str())
-                                                                    {
-                                                                        // store handshake address
-                                                                        self.nym_address =
-                                                                            Some(addr.to_string());
-                                                                    }
-                                                                    continue;
-                                                                } else if msg_type == 0 {
-                                                                    if let Some(msg_txt) = obj
-                                                                        .get("message")
-                                                                        .and_then(|v| v.as_str())
-                                                                    {
-                                                                        // Persist incoming
-                                                                        let user = self
-                                                                            .current_user
-                                                                            .as_deref()
-                                                                            .unwrap_or("");
-                                                                        let _ = self
-                                                                            .db
-                                                                            .save_message(
-                                                                                user,
-                                                                                sender,
-                                                                                false,
-                                                                                msg_txt,
-                                                                                incoming.ts,
-                                                                            )
-                                                                            .await;
-                                                                        msgs.push((
-                                                                            sender.to_string(),
-                                                                            msg_txt.to_string(),
-                                                                        ));
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    // Helpers to keep the match arms clean:
+    async fn process_register_challenge(
+        &mut self,
+        username: &str,
+        content: &str,
+    ) -> anyhow::Result<()> {
+        if let Ok(v) = serde_json::from_str::<Value>(content) {
+            if let Some(nonce) = v.get("nonce").and_then(|n| n.as_str()) {
+                let sk = self.private_key.as_ref().unwrap();
+                let sig_bytes = Crypto::sign(sk, nonce.as_bytes())?;
+                let signature = hex::encode(&sig_bytes);
+                self.service
+                    .send_registration_response(username, &signature)
+                    .await?;
             }
         }
-        msgs
+        Ok(())
     }
+
+    async fn process_register_response(
+        &mut self,
+        username: &str,
+        result: &str,
+    ) -> anyhow::Result<bool> {
+        if result == "success" {
+            let sk = self.private_key.as_ref().unwrap();
+            let pk = self.public_key.as_ref().unwrap();
+            self.crypto.save_keys("storage", username, sk, pk)?;
+            self.db.init_user(username).await?;
+            self.current_user = Some(username.to_string());
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn process_login_challenge(&mut self, content: &str) -> anyhow::Result<()> {
+        if let Ok(v) = serde_json::from_str::<Value>(content) {
+            if let Some(nonce) = v.get("nonce").and_then(|n| n.as_str()) {
+                let sk = self.private_key.as_ref().unwrap();
+                let sig_bytes = Crypto::sign(sk, nonce.as_bytes())?;
+                let signature = hex::encode(&sig_bytes);
+                self.service
+                    .send_login_response(self.current_user.as_deref().unwrap(), &signature)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn process_login_response(
+        &mut self,
+        username: &str,
+        result: &str,
+    ) -> anyhow::Result<bool> {
+        if result == "success" {
+            self.db.init_user(username).await?;
+            self.current_user = Some(username.to_string());
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Handle the queryResponse "action" from the server (context = "query").
+    async fn process_query_response(
+        &mut self,
+        content: &str,
+    ) -> anyhow::Result<Option<(String, String)>> {
+        if let Ok(v) = serde_json::from_str::<Value>(content) {
+            if let (Some(user), Some(pk)) = (
+                v.get("username").and_then(|u| u.as_str()),
+                v.get("publicKey").and_then(|k| k.as_str()),
+            ) {
+                if let Some(me) = &self.current_user {
+                    let _ = self.db.add_contact(me, user, pk).await;
+                }
+                return Ok(Some((user.to_string(), pk.to_string())));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Dispatch a single incoming envelope and return decrypted chat messages.
+    pub async fn process_received_message(&mut self, incoming: Incoming) -> Vec<(String, String)> {
+        let ts = incoming.ts;
+        match self.decrypt_and_verify(incoming).await {
+            Ok(Some((sender, ChatMsg::Text(msg)))) => {
+                let user = self.current_user.as_deref().unwrap_or("");
+                let _ = self.db.save_message(user, &sender, false, &msg, ts).await;
+                vec![(sender, msg)]
+            }
+            Ok(Some((_sender, ChatMsg::Handshake(addr)))) => {
+                self.nym_address = Some(addr);
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    async fn decrypt_and_verify(
+        &mut self,
+        incoming: Incoming,
+    ) -> Result<Option<(String, ChatMsg)>> {
+        let env = incoming.envelope;
+        if env.action.as_str() != "incomingMessage" || env.context.as_deref() != Some("chat") {
+            return Ok(None);
+        }
+
+        let payload_str = env.content.ok_or_else(|| anyhow!("Missing content"))?;
+        let payload: Value = serde_json::from_str(&payload_str)?;
+
+        let sender = payload["sender"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing sender"))?
+            .to_string();
+        let body = &payload["body"];
+
+        let encrypted_val = body["encryptedPayload"].clone();
+        let sig_str = body["payloadSignature"]
+            .as_str()
+            .ok_or_else(|| anyhow!("Missing signature"))?;
+
+        let contact = self
+            .db
+            .get_contact(self.current_user.as_deref().unwrap_or(""), &sender)
+            .await?;
+        let pk_bytes = contact
+            .map(|(_, pk)| pk.into_bytes())
+            .ok_or_else(|| anyhow!("Unknown sender public key"))?;
+
+        let enc_json = encrypted_val.to_string();
+        let sig_bytes = hex::decode(sig_str)?;
+        if !Crypto::verify(&pk_bytes, enc_json.as_bytes(), &sig_bytes) {
+            return Ok(None);
+        }
+
+        let encrypted: Encrypted = serde_json::from_value(encrypted_val)?;
+        let sk = self
+            .private_key
+            .as_ref()
+            .ok_or_else(|| anyhow!("Missing private key"))?;
+        let decrypted = Crypto::decrypt(sk, &encrypted)?;
+
+        let text = String::from_utf8(decrypted)?;
+        let msg_val: Value = serde_json::from_str(&text)?;
+
+        if let Some(msg_type) = msg_val["type"].as_i64() {
+            let content = msg_val["message"].as_str().unwrap_or("").to_string();
+            let chat_msg = match msg_type {
+                0 => ChatMsg::Text(content),
+                1 => ChatMsg::Handshake(content),
+                _ => return Ok(None),
+            };
+            Ok(Some((sender, chat_msg)))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+enum ChatMsg {
+    Text(String),
+    Handshake(String),
 }
