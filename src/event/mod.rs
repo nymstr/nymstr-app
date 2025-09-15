@@ -20,7 +20,7 @@ pub fn handle_key_event(app: &mut App, key_event: KeyEvent) -> io::Result<()> {
     // Chat section-specific behavior
     if let Some(chat) = app.screen.as_chat_mut() {
         match chat.section {
-            // neutral: Tab→Contacts, i→Input, s→Search phase, q→Quit
+            // neutral: Tab→Contacts, i→Input, s→Search phase, g→Group search, q→Quit
             ChatSection::Messages => match key_event.code {
                 KeyCode::Tab => {
                     chat.section = ChatSection::Contacts;
@@ -31,6 +31,9 @@ pub fn handle_key_event(app: &mut App, key_event: KeyEvent) -> io::Result<()> {
                 }
                 KeyCode::Char('s') => {
                     app.phase = crate::app::Phase::Search;
+                }
+                KeyCode::Char('g') => {
+                    app.phase = crate::app::Phase::GroupSearch;
                 }
                 KeyCode::Char('q') => {
                     app.quit();

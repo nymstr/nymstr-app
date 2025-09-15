@@ -1,0 +1,67 @@
+//! Basic cryptographic utilities
+
+use anyhow::Result;
+use pgp::composed::{SignedSecretKey, SignedPublicKey};
+
+/// Basic crypto utilities: file operations and key management
+#[derive(Clone, Copy)]
+pub struct Crypto;
+
+impl Crypto {
+    /// Save private and public key PEM files for the given username in a storage directory.
+    pub fn save_keys(
+        &self,
+        storage_dir: &str,
+        username: &str,
+        private_pem: &[u8],
+        public_pem: &[u8],
+    ) -> Result<()> {
+        use std::{fs, path::Path};
+        let user_dir = Path::new(storage_dir).join(username);
+        fs::create_dir_all(&user_dir)?;
+        fs::write(
+            user_dir.join(format!("{}_private_key.pem", username)),
+            private_pem,
+        )?;
+        fs::write(
+            user_dir.join(format!("{}_public_key.pem", username)),
+            public_pem,
+        )?;
+        Ok(())
+    }
+
+    /// Load the private key PEM bytes for the given username from a storage directory.
+    pub fn load_private_key_from_file(&self, storage_dir: &str, username: &str) -> Result<Vec<u8>> {
+        use std::{fs, path::Path};
+        let path = Path::new(storage_dir)
+            .join(username)
+            .join(format!("{}_private_key.pem", username));
+        let data = fs::read(path)?;
+        Ok(data)
+    }
+
+    /// Load the public key PEM bytes for the given username from a storage directory.
+    pub fn load_public_key_from_file(&self, storage_dir: &str, username: &str) -> Result<Vec<u8>> {
+        use std::{fs, path::Path};
+        let path = Path::new(storage_dir)
+            .join(username)
+            .join(format!("{}_public_key.pem", username));
+        let data = fs::read(path)?;
+        Ok(data)
+    }
+
+    /// Generate PGP keypair for given user ID (backward compatibility)
+    pub fn generate_pgp_keypair(user_id: &str) -> Result<(SignedSecretKey, SignedPublicKey)> {
+        crate::crypto::pgp::PgpKeyManager::generate_keypair(user_id)
+    }
+
+    /// Get armored public key from PGP certificate (backward compatibility)
+    pub fn pgp_public_key_armored(public_key: &SignedPublicKey) -> Result<String> {
+        crate::crypto::pgp::PgpKeyManager::public_key_armored(public_key)
+    }
+
+    /// Create detached PGP signature (backward compatibility)
+    pub fn pgp_sign_detached(secret_key: &SignedSecretKey, data: &[u8]) -> Result<String> {
+        crate::crypto::pgp::PgpSigner::sign_detached(secret_key, data)
+    }
+}

@@ -29,6 +29,9 @@ pub enum Phase {
     LoggingIn,
     Chat,
     Search,
+    GroupSearch,
+    GroupView,
+    GroupInput,
 }
 
 pub struct App {
@@ -51,6 +54,19 @@ pub struct App {
     // handle for in-flight search query (returns handler and query result)
     search_handle:
         Option<tokio::task::JoinHandle<(MessageHandler, anyhow::Result<Option<(String, String)>>)>>,
+    /// Group search mode buffer & result
+    group_search_buffer: String,
+    group_search_result: Option<String>,
+    group_search_loading: bool,
+    group_search_spinner_idx: usize,
+    group_search_handle: Option<tokio::task::JoinHandle<(MessageHandler, anyhow::Result<bool>)>>,
+    /// Group messages
+    group_messages: Vec<String>,
+    /// Group authentication state
+    group_authenticated: bool,
+    group_server_address: String,
+    /// Group input buffer for typing messages
+    group_input_buffer: String,
     /// Log panel scroll offset (0 = bottom/latest)
     log_scroll: usize,
     /// Outgoing messages queued for sending after local echo
@@ -79,6 +95,15 @@ impl App {
             search_loading: false,
             search_spinner_idx: 0,
             search_handle: None,
+            group_search_buffer: String::new(),
+            group_search_result: None,
+            group_search_loading: false,
+            group_search_spinner_idx: 0,
+            group_search_handle: None,
+            group_messages: Vec::new(),
+            group_authenticated: false,
+            group_server_address: String::new(),
+            group_input_buffer: String::new(),
             log_scroll: 0,
             pending_outgoing: Vec::new(),
             // Splash animation state
@@ -262,12 +287,46 @@ impl App {
                     self.search_spinner_idx = self.search_spinner_idx.wrapping_add(1);
                 }
             }
-            // ——— auto‑drain incoming messages in Chat phase ———
-            if self.phase == Phase::Chat {
-                if let Some(handler) = &mut self.handler {
-                    while let Ok(incoming_msg) = handler.incoming_rx.try_recv() {
-                        let msgs = handler.process_received_message(incoming_msg).await;
-                        for (from, text) in msgs {
+
+            // —————— Poll outstanding group search and advance spinner ——————
+            if let Some(handle) = &mut self.group_search_handle {
+                if handle.is_finished() {
+                    // retrieve handler and result
+                    if let Ok((handler, res)) = handle.await {
+                        // restore handler
+                        self.handler = Some(handler);
+                        // set group search result
+                        match res {
+                            Ok(success) if success => {
+                                self.group_search_result = Some("Authenticated with group".to_string());
+                                self.group_authenticated = true;
+                            }
+                            Ok(_) => {
+                                self.group_search_result = Some("Authentication failed".to_string());
+                            }
+                            Err(_) => {
+                                self.group_search_result = Some("Connection failed".to_string());
+                            }
+                        }
+                    }
+                    self.group_search_handle = None;
+                    self.group_search_loading = false;
+                } else {
+                    // animate loader
+                    self.group_search_spinner_idx = self.group_search_spinner_idx.wrapping_add(1);
+                }
+            }
+            // ——— auto‑drain incoming messages ———
+            if let Some(handler) = &mut self.handler {
+                while let Ok(incoming_msg) = handler.incoming_rx.try_recv() {
+                    let msgs = handler.process_received_message(incoming_msg).await;
+                    for (from, text) in msgs {
+                        // Check if this is a group message by looking at the message format
+                        if text.starts_with("Group:") || self.phase == Phase::GroupView || self.phase == Phase::GroupInput {
+                            // Add to group messages
+                            self.group_messages.push(format!("{}: {}", from, text));
+                        } else if self.phase == Phase::Chat {
+                            // Add to regular chat messages
                             if let Some(chat) = self.screen.as_chat_mut() {
                                 let idx = match chat.contacts.iter().position(|c| c.id == from) {
                                     Some(i) => i,
@@ -560,6 +619,136 @@ impl App {
                                 _ => {}
                             }
                         }
+                        Phase::GroupSearch => {
+                            match key.code {
+                                // --- MENU COMMANDS (only when authenticated) ---
+                                KeyCode::Char('1')
+                                    if self.group_authenticated =>
+                                {
+                                    // View group messages
+                                    self.phase = Phase::GroupView;
+                                }
+                                KeyCode::Char('2') if self.group_search_result.is_some() => {
+                                    // Search again: clear only search state
+                                    self.group_search_buffer.clear();
+                                    self.group_search_result = None;
+                                    self.group_search_loading = false;
+                                    self.group_search_handle = None;
+                                }
+                                KeyCode::Char('3') | KeyCode::Esc
+                                    if self.group_search_result.is_some() =>
+                                {
+                                    // Back to chat: clear state and exit
+                                    self.group_search_buffer.clear();
+                                    self.group_search_result = None;
+                                    self.group_search_loading = false;
+                                    self.group_search_handle = None;
+                                    self.phase = Phase::Chat;
+                                }
+
+                                // --- REGULAR TYPING (only when no result & not loading) ---
+                                KeyCode::Char(c)
+                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                {
+                                    self.group_search_buffer.push(c);
+                                }
+                                KeyCode::Backspace
+                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                {
+                                    self.group_search_buffer.pop();
+                                }
+
+                                // --- START GROUP SEARCH (only when no result & not loading) ---
+                                KeyCode::Enter
+                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                {
+                                    // Start group authentication
+                                    if let Some(mut handler) = self.handler.take() {
+                                        if let Some(user) = &self.logged_in_user {
+                                            let username = user.username.clone();
+                                            let server_addr = self.group_search_buffer.clone();
+                                            // Store the server address for later use
+                                            self.group_server_address = server_addr.clone();
+                                            let h = tokio::spawn(async move {
+                                                let res = handler.authenticate_group(&username, &server_addr).await;
+                                                (handler, res)
+                                            });
+                                            self.group_search_handle = Some(h);
+                                            self.group_search_loading = true;
+                                            self.group_search_spinner_idx = 0;
+                                        } else {
+                                            self.group_search_result = Some("Please login first".to_string());
+                                        }
+                                    }
+                                }
+
+                                // Ignore all other keys in GroupSearch
+                                _ => {}
+                            }
+                        }
+                        Phase::GroupView => {
+                            match key.code {
+                                KeyCode::Char('s') => {
+                                    // Get server statistics
+                                    if let Some(mut handler) = self.handler.take() {
+                                        let group_addr = self.group_server_address.clone();
+                                        let h = tokio::spawn(async move {
+                                            let res = handler.get_group_stats(&group_addr).await;
+                                            // Convert () to bool for consistency
+                                            (handler, res.map(|_| true))
+                                        });
+                                        self.group_search_handle = Some(h);
+                                        self.group_search_loading = true;
+                                    }
+                                }
+                                KeyCode::Char('i') => {
+                                    // Switch to input mode
+                                    self.phase = Phase::GroupInput;
+                                }
+                                KeyCode::Esc => {
+                                    // Back to chat
+                                    self.phase = Phase::Chat;
+                                }
+                                _ => {}
+                            }
+                        }
+                        Phase::GroupInput => {
+                            match key.code {
+                                KeyCode::Char(c) => {
+                                    self.group_input_buffer.push(c);
+                                }
+                                KeyCode::Backspace => {
+                                    self.group_input_buffer.pop();
+                                }
+                                KeyCode::Enter => {
+                                    // Send message to group
+                                    if !self.group_input_buffer.trim().is_empty() {
+                                        if let Some(mut handler) = self.handler.take() {
+                                            let message = self.group_input_buffer.clone();
+                                            let message_display = message.clone();
+                                            let group_addr = self.group_server_address.clone();
+                                            let h = tokio::spawn(async move {
+                                                let res = handler.send_group_message(&message, &group_addr).await;
+                                                // Convert () to bool for consistency
+                                                (handler, res.map(|_| true))
+                                            });
+                                            self.group_search_handle = Some(h);
+                                            self.group_search_loading = true;
+                                            // Add message to local display immediately
+                                            let user = self.logged_in_user.as_ref().map(|u| u.username.as_str()).unwrap_or("You");
+                                            self.group_messages.push(format!("{}: {}", user, message_display));
+                                            self.group_input_buffer.clear();
+                                        }
+                                    }
+                                    self.phase = Phase::GroupView;
+                                }
+                                KeyCode::Esc => {
+                                    // Back to group view
+                                    self.phase = Phase::GroupView;
+                                }
+                                _ => {}
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -606,6 +795,9 @@ impl App {
             Login => self.draw_login(frame, content_area),
             Chat => crate::ui::render_ui(self, frame, content_area),
             Search => self.draw_search(frame, content_area),
+            GroupSearch => self.draw_group_search(frame, content_area),
+            GroupView => self.draw_group_view(frame, content_area),
+            GroupInput => self.draw_group_input(frame, content_area),
         }
     }
 
@@ -876,5 +1068,160 @@ impl App {
         let lines: Vec<Line> = slice.iter().map(|l| Line::from(l.as_str())).collect();
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, inner);
+    }
+
+    fn draw_group_search(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::{
+            layout::{Alignment, Constraint, Direction, Layout},
+            style::{Color, Style},
+            widgets::{Block, Borders, Paragraph},
+        };
+        let title = "Group Search: enter group server address and press Enter, Esc to cancel";
+        let block = Block::default().title(title).borders(Borders::ALL);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        // Split into 3 rows: input, result, options
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Length(3),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
+            .split(inner);
+
+        // 1) Group server address input
+        let input = Paragraph::new(self.group_search_buffer.as_str())
+            .block(Block::default().borders(Borders::ALL).title("Group Server Address"))
+            .alignment(Alignment::Left);
+        frame.render_widget(input, chunks[0]);
+
+        // 2) Loading spinner or Result
+        if self.group_search_loading {
+            // bouncing ball animation
+            let spin = crate::ui::widgets::splash::bouncing_ball(self.group_search_spinner_idx, 12);
+            let p = Paragraph::new(spin)
+                .style(Style::default().fg(Color::Rgb(0, 255, 0)))
+                .alignment(Alignment::Left);
+            frame.render_widget(p, chunks[1]);
+        } else if let Some(res) = &self.group_search_result {
+            let result = Paragraph::new(res.as_str())
+                .block(Block::default().borders(Borders::ALL).title("Result"))
+                .alignment(Alignment::Left);
+            frame.render_widget(result, chunks[1]);
+        }
+
+        // 3) Options, only if we got a result and not loading
+        if !self.group_search_loading {
+            if let Some(res) = &self.group_search_result {
+                if self.group_authenticated {
+                    let opts = "[1] View Group    [2] Search Again    [3] Home";
+                    let menu = Paragraph::new(opts).alignment(Alignment::Center);
+                    frame.render_widget(menu, chunks[2]);
+                } else if res != "Connection failed" && res != "Please login first" {
+                    let menu = Paragraph::new("[2] Search Again    [3] Home").alignment(Alignment::Center);
+                    frame.render_widget(menu, chunks[2]);
+                }
+            }
+        }
+    }
+
+    fn draw_group_view(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::{
+            layout::{Alignment, Constraint, Direction, Layout},
+            style::{Color, Style},
+            text::Line,
+            widgets::{Block, Borders, List, ListItem, Paragraph},
+        };
+        let title = "Group View: i to type message, s for stats, Esc to go back";
+        let block = Block::default().title(title).borders(Borders::ALL);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        
+        // Split into message area and instructions
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(0), Constraint::Length(1)].as_ref())
+            .split(inner);
+
+        // Show group messages
+        if self.group_messages.is_empty() {
+            let empty_msg = Paragraph::new("No messages yet. Messages are delivered automatically via push.")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Gray));
+            frame.render_widget(empty_msg, chunks[0]);
+        } else {
+            let items: Vec<ListItem> = self.group_messages
+                .iter()
+                .map(|msg| ListItem::new(Line::from(msg.as_str())))
+                .collect();
+            let list = List::new(items)
+                .block(Block::default().borders(Borders::ALL).title("Group Messages"));
+            frame.render_widget(list, chunks[0]);
+        }
+
+        // Instructions
+        let instructions = Paragraph::new("[I] Type Message    [S] Server Stats    [Esc] Back")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(instructions, chunks[1]);
+    }
+
+    fn draw_group_input(&self, frame: &mut Frame, area: Rect) {
+        use ratatui::{
+            layout::{Alignment, Constraint, Direction, Layout},
+            style::{Color, Style},
+            text::Line,
+            widgets::{Block, Borders, List, ListItem, Paragraph},
+        };
+        let title = "Group Input: type message and press Enter, Esc to go back";
+        let block = Block::default().title(title).borders(Borders::ALL);
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        
+        // Split into message area, input area, and instructions
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(0), 
+                Constraint::Length(3), 
+                Constraint::Length(1)
+            ].as_ref())
+            .split(inner);
+
+        // Show group messages (recent ones)
+        if self.group_messages.is_empty() {
+            let empty_msg = Paragraph::new("No messages yet. Type a message below.")
+                .alignment(Alignment::Center)
+                .style(Style::default().fg(Color::Gray));
+            frame.render_widget(empty_msg, chunks[0]);
+        } else {
+            // Show last 10 messages
+            let recent_messages: Vec<ListItem> = self.group_messages
+                .iter()
+                .rev()
+                .take(10)
+                .rev()
+                .map(|msg| ListItem::new(Line::from(msg.as_str())))
+                .collect();
+            let list = List::new(recent_messages)
+                .block(Block::default().borders(Borders::ALL).title("Recent Messages"));
+            frame.render_widget(list, chunks[0]);
+        }
+
+        // Input field
+        let input = Paragraph::new(self.group_input_buffer.as_str())
+            .block(Block::default().borders(Borders::ALL).title("Type Message"))
+            .alignment(Alignment::Left);
+        frame.render_widget(input, chunks[1]);
+
+        // Instructions
+        let instructions = Paragraph::new("[Enter] Send    [Esc] Back to View")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(instructions, chunks[2]);
     }
 }

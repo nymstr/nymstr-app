@@ -27,8 +27,22 @@ thiserror = "1.0"
 log = "0.4"
 env_logger = "0.9"
 dotenvy = "0.15"
+clap = { version = "4.0", features = ["derive"] }
  fastrand = "1.9"
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "chrono"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "chrono"] }
+rusqlite = "0.32"
+pgp = "0.13"
+# MLS dependencies
+mls-rs = { version = "0.51.0", features = ["sqlite"] }
+mls-rs-core = "0.24.0"
+mls-rs-crypto-openssl = "0.18.0"
+mls-rs-provider-sqlite = "0.19.0"
+async-trait = "0.1"
+ed25519-zebra = { version = "*", features = ["alloc"] }
 # removed tachyonfx
 #[removed] rand_core = "0.6"
 #[removed] ring = "0.16"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"

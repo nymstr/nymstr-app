@@ -5,6 +5,7 @@ use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use std::{fs, path::Path};
 
 /// SQLite-backed database.
+#[derive(Debug)]
 pub struct Db {
     pool: SqlitePool,
 }
@@ -39,10 +40,12 @@ impl Db {
         Ok(())
     }
 
-    /// Create per-user tables (contacts and messages).
+    /// Create per-user tables (contacts, messages, and MLS groups).
     pub async fn init_user(&self, username: &str) -> Result<()> {
         let contacts_table = format!("contacts_{}", username);
         let messages_table = format!("messages_{}", username);
+        let mls_groups_table = format!("mls_groups_{}", username);
+
         sqlx::query(&format!(
             r#"
             CREATE TABLE IF NOT EXISTS {contacts_table} (
@@ -54,6 +57,7 @@ impl Db {
         ))
         .execute(&self.pool)
         .await?;
+
         sqlx::query(&format!(
             r#"
             CREATE TABLE IF NOT EXISTS {messages_table} (
@@ -68,6 +72,21 @@ impl Db {
         ))
         .execute(&self.pool)
         .await?;
+
+        sqlx::query(&format!(
+            r#"
+            CREATE TABLE IF NOT EXISTS {mls_groups_table} (
+                conversation_id TEXT PRIMARY KEY,
+                group_state BLOB NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+            mls_groups_table = mls_groups_table,
+        ))
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -263,6 +282,69 @@ impl Db {
             msgs.push((username, msg_type, message, ts));
         }
         Ok(msgs)
+    }
+
+    /// Save MLS group state for a conversation.
+    pub async fn save_mls_group_state(&self, me: &str, conversation_id: &str, group_state: &[u8]) -> Result<()> {
+        let table = format!("mls_groups_{}", me);
+        sqlx::query(&format!(
+            r#"
+            INSERT OR REPLACE INTO {table} (conversation_id, group_state, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP)
+            "#,
+            table = table
+        ))
+        .bind(conversation_id)
+        .bind(group_state)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Load MLS group state for a conversation.
+    pub async fn load_mls_group_state(&self, me: &str, conversation_id: &str) -> Result<Option<Vec<u8>>> {
+        let table = format!("mls_groups_{}", me);
+        if let Some(row) = sqlx::query(&format!(
+            r#"SELECT group_state FROM {table} WHERE conversation_id = ?"#,
+            table = table
+        ))
+        .bind(conversation_id)
+        .fetch_optional(&self.pool)
+        .await?
+        {
+            let state: Vec<u8> = row.try_get("group_state")?;
+            Ok(Some(state))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Delete MLS group state for a conversation.
+    pub async fn delete_mls_group_state(&self, me: &str, conversation_id: &str) -> Result<()> {
+        let table = format!("mls_groups_{}", me);
+        sqlx::query(&format!(
+            "DELETE FROM {table} WHERE conversation_id = ?",
+            table = table
+        ))
+        .bind(conversation_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// List all MLS conversations for a user.
+    pub async fn list_mls_conversations(&self, me: &str) -> Result<Vec<String>> {
+        let table = format!("mls_groups_{}", me);
+        let rows = sqlx::query(&format!(
+            r#"SELECT conversation_id FROM {table} ORDER BY updated_at DESC"#,
+            table = table
+        ))
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|r| r.try_get("conversation_id").unwrap())
+            .collect())
     }
 }
 
