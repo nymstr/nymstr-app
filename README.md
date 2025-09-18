@@ -1,4 +1,4 @@
- # NymCHAT
+ # nymstr
  
  > **⚠️ Under Active Development**
  > This is a minimal prototype and may contain bugs. Features and APIs may
@@ -14,7 +14,7 @@
     echo 'SERVER_ADDRESS=<server_address>' >> .env
     ```
  
- 2. Build and run the client:
+2. Build and run the client:
  
     ```bash
     cargo run
@@ -33,6 +33,7 @@
  - `Tab` — Switch focus to **Contacts**
  - `i` — Switch focus to **Input**
  - `s` — Open **Search** mode
+- `g` — Open **Group Search** mode
  - `q` — Quit
  
  ---
@@ -63,3 +64,29 @@
  - `3` or `Esc` — Cancel and return to **Chat**
  
  ---
+**Group Search Mode**
+
+- *Type* — Enter group server address
+- `Enter` — Connect to group server
+- `1` — View group messages (when connected)
+- `2` — Search again (clear)
+- `3` or `Esc` — Cancel and return to **Chat**
+
+---
+
+**Group View Mode**
+
+- `i` — Switch to input mode to type messages
+- `s` — Get server statistics (queue status)
+- `Esc` — Return to **Chat**
+
+---
+
+**Group Input Mode**
+
+- *Type* — Enter message text
+- `Enter` — Send message to group
+- `Esc` — Return to **Group View**
+
+---
+

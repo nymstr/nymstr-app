@@ -323,6 +323,8 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
         Commands::Send { from, recipient, message } => {
             app.send_message(&from, &recipient, &message).await?;
+            // Wait for message to be transmitted through mixnet before shutting down
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
         }
 
         Commands::Query { username } => {

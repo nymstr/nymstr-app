@@ -44,7 +44,7 @@ impl MlsClient {
     /// Create a new MLS client with persistent storage
     pub fn new(identity: &str, pgp_secret_key: SignedSecretKey, pgp_public_key: SignedPublicKey, db: Arc<Db>) -> Result<Self> {
         // Create MLS database path (separate from main app database)
-        let mls_db_path = format!("nymstr_mls_{}.db", identity);
+        let mls_db_path = crate::core::db::get_mls_db_path(identity);
         let connection_strategy = FileConnectionStrategy::new(std::path::Path::new(&mls_db_path));
         let storage_engine = SqLiteDataStorageEngine::new(connection_strategy)
             .map_err(|e| anyhow!("Failed to create MLS storage engine: {}", e))?;

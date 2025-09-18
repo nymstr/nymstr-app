@@ -4,6 +4,11 @@ use chrono::{DateTime, Utc};
 use sqlx::{Row, SqlitePool, sqlite::SqlitePoolOptions};
 use std::{fs, path::Path};
 
+/// Get the full path for an MLS database file in the storage directory
+pub fn get_mls_db_path(username: &str) -> String {
+    format!("storage/nymstr_mls_{}.db", username)
+}
+
 /// SQLite-backed database.
 #[derive(Debug)]
 pub struct Db {

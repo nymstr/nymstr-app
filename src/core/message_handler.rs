@@ -117,7 +117,7 @@ impl MessageHandler {
         self.pgp_public_key = Some(public_key.clone());
         self.pgp_secret_key = Some(secret_key.clone());
         // Initialize MLS storage path for client creation
-        self.mls_storage_path = Some(format!("nymstr_mls_{}.db", username));
+        self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
         // Get armored public key
         let public_key_armored = Crypto::pgp_public_key_armored(&public_key)?;
         // Persist and send the public key in armored format
@@ -180,7 +180,7 @@ impl MessageHandler {
         self.pgp_public_key = Some(public_key.clone());
         self.pgp_secret_key = Some(secret_key.clone());
         // Initialize MLS storage path for client creation
-        self.mls_storage_path = Some(format!("nymstr_mls_{}.db", username));
+        self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
 
         // Send initial login request
         self.service.send_login_request(username).await?;
