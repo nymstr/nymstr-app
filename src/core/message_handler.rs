@@ -277,20 +277,20 @@ impl MessageHandler {
 
         // Try to load existing PGP keys, or generate new ones if they don't exist
         let (secret_key, public_key) = if PgpKeyManager::keys_exist(username) {
-            // Keys exist but we need to handle the fact that they might have different passphrases
-            // TODO: In production, prompt user for passphrase and use load_keypair_secure
-            // For now, try legacy load first for backwards compatibility, then fall back to secure generation
-            #[allow(deprecated)]
-            if let Some((existing_secret, existing_public)) = PgpKeyManager::load_keypair(username)? {
-                log::info!("Loaded existing PGP keys for user: {}", username);
-                (existing_secret, existing_public)
-            } else {
-                // If legacy load fails, generate new secure keys
-                log::info!("Legacy keys couldn't be loaded, generating new secure PGP keys for user: {}", username);
-                let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
-                PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
-                log::info!("Saved new secure PGP keys for user: {}", username);
-                (new_secret, new_public)
+            // Load existing secure keys
+            log::info!("Loading existing PGP keys for user: {}", username);
+            match PgpKeyManager::load_keypair_secure(username, &passphrase)? {
+                Some((secret, public)) => {
+                    log::info!("Successfully loaded existing PGP keys for user: {}", username);
+                    (secret, public)
+                }
+                None => {
+                    log::warn!("Keys exist but failed to load, generating new ones for user: {}", username);
+                    let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
+                    PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
+                    log::info!("Saved new secure PGP keys for user: {}", username);
+                    (new_secret, new_public)
+                }
             }
         } else {
             log::info!("Generating new secure PGP keys for user: {}", username);

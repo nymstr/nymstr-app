@@ -77,13 +77,6 @@ impl MlsClient {
         })
     }
 
-    /// Create a new MLS client and generate PGP keys (legacy method)
-    #[deprecated(note = "Use new_with_generated_keys_secure with proper passphrase instead")]
-    pub fn new_with_generated_keys(identity: &str, db: Arc<Db>) -> Result<Self> {
-        log::warn!("Using deprecated new_with_generated_keys method");
-        let passphrase = SecurePassphrase::generate_strong();
-        Self::new_with_generated_keys_secure(identity, db, &passphrase)
-    }
 
     /// Create a new MLS client and generate secure PGP keys
     pub fn new_with_generated_keys_secure(identity: &str, db: Arc<Db>, passphrase: &SecurePassphrase) -> Result<Self> {
@@ -360,12 +353,6 @@ impl MlsClient {
         &self.pgp_secret_key
     }
 
-    /// Sign data with PGP key (legacy method)
-    #[deprecated(note = "Use pgp_sign_secure with proper passphrase instead")]
-    pub fn pgp_sign(&self, data: &[u8]) -> Result<String> {
-        log::warn!("Using deprecated pgp_sign method");
-        PgpSigner::sign_detached(&self.pgp_secret_key, data)
-    }
 
     /// Sign data with PGP key using secure method
     pub fn pgp_sign_secure(&self, data: &[u8], passphrase: &SecurePassphrase) -> Result<String> {

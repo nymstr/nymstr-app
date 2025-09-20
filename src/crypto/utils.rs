@@ -51,11 +51,6 @@ impl Crypto {
         Ok(data)
     }
 
-    /// Generate PGP keypair for given user ID (backward compatibility)
-    #[deprecated(note = "Use generate_pgp_keypair_secure with proper passphrase instead")]
-    pub fn generate_pgp_keypair(user_id: &str) -> Result<(SignedSecretKey, SignedPublicKey)> {
-        crate::crypto::pgp::PgpKeyManager::generate_keypair(user_id)
-    }
 
     /// Generate secure PGP keypair with Ed25519 keys
     pub fn generate_pgp_keypair_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
@@ -72,11 +67,6 @@ impl Crypto {
         crate::crypto::pgp::PgpKeyManager::public_key_armored(public_key)
     }
 
-    /// Create detached PGP signature (backward compatibility)
-    #[deprecated(note = "Use pgp_sign_detached_secure with proper passphrase instead")]
-    pub fn pgp_sign_detached(secret_key: &SignedSecretKey, data: &[u8]) -> Result<String> {
-        crate::crypto::pgp::PgpSigner::sign_detached(secret_key, data)
-    }
 
     /// Create secure detached PGP signature
     pub fn pgp_sign_detached_secure(secret_key: &SignedSecretKey, data: &[u8], passphrase: &SecurePassphrase) -> Result<String> {

@@ -118,32 +118,6 @@ impl CliApp {
         Ok(())
     }
 
-    pub async fn register(&mut self, username: &str) -> Result<bool> {
-        let handler = self.handler.as_mut()
-            .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
-
-        info!("Registering user: {}", username);
-
-        // Use KeyManager to create new keys with password prompting
-        let (secret_key, public_key, passphrase) = KeyManager::create_new_keys(username)?;
-
-        // Verify keys are valid
-        KeyManager::verify_keys(&secret_key, &public_key)?;
-
-        // Set the keys in the message handler
-        handler.set_pgp_keys(secret_key, public_key, passphrase);
-
-        // Now register with the server
-        let success = handler.register_user(username).await?;
-
-        if success {
-            info!("Registration successful for user: {}", username);
-        } else {
-            info!("Registration failed for user: {}", username);
-        }
-
-        Ok(success)
-    }
 
     pub async fn login(&mut self, username: &str) -> Result<bool> {
         let handler = self.handler.as_mut()
@@ -337,7 +311,9 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Register { username } => {
-            app.register(&username).await?;
+            let handler = app.handler.as_mut()
+                .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
+            handler.register_user(&username).await?;
         }
 
         Commands::Login { username } => {

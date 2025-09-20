@@ -102,29 +102,6 @@ impl MixnetService {
     }
 
     /// Register a new user: generate keys, send registration envelope
-    #[deprecated(note = "Use CLI registration flow through MessageHandler instead")]
-    pub async fn register(&self, username: &str) -> Result<()> {
-        // generate a new PGP keypair for user registration
-        let (_secret_key, public_key) = Crypto::generate_pgp_keypair(username)
-            .context("PGP key generation failed")?;
-        let public_pem = Crypto::pgp_public_key_armored(&public_key)
-            .context("Failed to get armored public key")?;
-        // public_pem is already armored PGP public key
-        let public_key_str = public_pem.clone();
-        // store user in database
-        self.db.register_user(username, &public_key_str).await?;
-        // build registration envelope
-        let env = MixnetMessage::register(username, &public_key_str);
-        let inner = env.to_json()?;
-        let raw_bytes = inner.into_bytes();
-        // send via mixnet to server
-        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
-        let recipient: Recipient = server_addr.parse()?;
-        self.sender
-            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
-            .await?;
-        Ok(())
-    }
 
     /// Login existing user: load keys, send login envelope
     pub async fn login(&self, username: &str) -> Result<()> {

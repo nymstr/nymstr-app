@@ -52,18 +52,8 @@ impl KeyManager {
             println!("✅ PGP keys loaded successfully for: {}", username);
             Ok((secret_key, public_key, passphrase))
         } else {
-            // Fallback: try legacy load for backwards compatibility
-            println!("⚠️  Trying legacy key format...");
-            #[allow(deprecated)]
-            if let Some((secret_key, public_key)) = PgpKeyManager::load_keypair(username)? {
-                println!("✅ Legacy PGP keys loaded for: {}", username);
-                println!("💡 Consider upgrading to secure format by re-registering");
-                // For legacy keys, we need a dummy passphrase since we don't have the original
-                let dummy_passphrase = SecurePassphrase::new("legacy_key_fallback".to_string());
-                Ok((secret_key, public_key, dummy_passphrase))
-            } else {
-                Err(anyhow!("Could not load PGP keys for user: {}. Check your passphrase or re-register.", username))
-            }
+            // No secure keys found
+            Err(anyhow!("Could not load PGP keys for user: {}. Check your passphrase or re-register.", username))
         }
     }
 

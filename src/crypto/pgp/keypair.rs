@@ -119,13 +119,6 @@ impl SecurePassphrase {
 pub struct PgpKeyManager;
 
 impl PgpKeyManager {
-    /// Generate PGP keypair for given user ID (legacy method)
-    #[deprecated(note = "Use generate_keypair_secure with proper passphrase instead")]
-    pub fn generate_keypair(user_id: &str) -> Result<(SignedSecretKey, SignedPublicKey)> {
-        log::warn!("Using deprecated generate_keypair method - consider upgrading to generate_keypair_secure");
-        let passphrase = SecurePassphrase::generate_strong();
-        Self::generate_keypair_secure(user_id, &passphrase)
-    }
 
     /// Generate secure PGP keypair with Ed25519 keys and proper passphrase
     pub fn generate_keypair_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
@@ -235,13 +228,6 @@ impl PgpKeyManager {
             .map_err(|e| anyhow!("Failed to armor public key: {}", e))
     }
 
-    /// Save PGP keypair to storage directory (legacy method)
-    #[deprecated(note = "Use save_keypair_secure with proper security instead")]
-    pub fn save_keypair(username: &str, secret_key: &SignedSecretKey, public_key: &SignedPublicKey) -> Result<()> {
-        log::warn!("Using deprecated save_keypair method - consider upgrading to save_keypair_secure");
-        let passphrase = SecurePassphrase::generate_strong();
-        Self::save_keypair_secure(username, secret_key, public_key, &passphrase)
-    }
 
     /// Save PGP keypair to storage directory with proper security
     pub fn save_keypair_secure(username: &str, secret_key: &SignedSecretKey, public_key: &SignedPublicKey, passphrase: &SecurePassphrase) -> Result<()> {
@@ -300,32 +286,6 @@ impl PgpKeyManager {
         Ok(hex::encode(hash))
     }
 
-    /// Load PGP keypair from storage directory (legacy method)
-    #[deprecated(note = "Use load_keypair_secure with proper integrity verification instead")]
-    pub fn load_keypair(username: &str) -> Result<Option<(SignedSecretKey, SignedPublicKey)>> {
-        log::warn!("Using deprecated load_keypair method - integrity verification disabled");
-
-        let user_dir = Path::new("storage").join(username).join("pgp_keys");
-        let secret_path = user_dir.join("secret.asc");
-        let public_path = user_dir.join("public.asc");
-
-        // Check if both files exist
-        if !secret_path.exists() || !public_path.exists() {
-            return Ok(None);
-        }
-
-        // Load secret key
-        let secret_armored = fs::read_to_string(&secret_path)?;
-        let (secret_key, _) = SignedSecretKey::from_string(&secret_armored)
-            .map_err(|e| anyhow!("Failed to parse secret key: {}", e))?;
-
-        // Load public key
-        let public_armored = fs::read_to_string(&public_path)?;
-        let (public_key, _) = SignedPublicKey::from_string(&public_armored)
-            .map_err(|e| anyhow!("Failed to parse public key: {}", e))?;
-
-        Ok(Some((secret_key, public_key)))
-    }
 
     /// Load PGP keypair from storage directory with integrity verification
     pub fn load_keypair_secure(username: &str, passphrase: &SecurePassphrase) -> Result<Option<(SignedSecretKey, SignedPublicKey)>> {

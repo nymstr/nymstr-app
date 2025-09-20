@@ -20,17 +20,6 @@ pub struct VerifiedSignature {
 }
 
 impl PgpSigner {
-    /// Create detached PGP signature (legacy method)
-    #[deprecated(note = "Use sign_detached_secure with proper passphrase instead")]
-    pub fn sign_detached(
-        secret_key: &SignedSecretKey,
-        data: &[u8],
-    ) -> Result<String> {
-        log::warn!("Using deprecated sign_detached method");
-        // Generate a temporary passphrase for backwards compatibility
-        let passphrase = SecurePassphrase::generate_strong();
-        Self::sign_detached_secure(secret_key, data, &passphrase)
-    }
 
     /// Create detached PGP signature with proper security using rPGP 0.16
     pub fn sign_detached_secure(
