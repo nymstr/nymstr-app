@@ -10,6 +10,6 @@ pub mod pgp;
 pub mod utils;
 
 // Re-export main types
-pub use mls::{MlsClient, EncryptedMessage, MlsMessageType};
+pub use mls::{EncryptedMessage, MlsMessageType};
 pub use pgp::{PgpKeyManager, PgpSigner};
 pub use utils::Crypto;

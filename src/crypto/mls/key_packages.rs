@@ -4,7 +4,6 @@ use anyhow::{Result, anyhow};
 use base64::Engine;
 use std::collections::HashMap;
 use crate::core::db::Db;
-use super::client::MlsClient;
 
 /// Manages MLS key package generation, storage, and exchange
 pub struct KeyPackageManager {
@@ -19,13 +18,6 @@ impl KeyPackageManager {
             key_package_cache: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
             db,
         }
-    }
-
-    /// Generate a key package for this client using MLS client
-    pub fn generate_key_package(&self, mls_client: &MlsClient) -> Result<String> {
-        let key_package_bytes = mls_client.generate_key_package()?;
-        let key_package_b64 = base64::engine::general_purpose::STANDARD.encode(&key_package_bytes);
-        Ok(key_package_b64)
     }
 
     /// Validate a received key package (basic validation)
@@ -59,29 +51,4 @@ impl KeyPackageManager {
         Ok(())
     }
 
-    /// Retrieve a stored key package for a user
-    pub fn get_key_package(&self, username: &str) -> Result<Option<String>> {
-        let cache = self.key_package_cache.lock().unwrap();
-        Ok(cache.get(username).cloned())
-    }
-
-    /// Check if we have a key package for a user
-    pub fn has_key_package(&self, username: &str) -> bool {
-        let cache = self.key_package_cache.lock().unwrap();
-        cache.contains_key(username)
-    }
-
-    /// Clear stored key package for a user (for testing/cleanup)
-    pub fn clear_key_package(&self, username: &str) -> Result<()> {
-        let mut cache = self.key_package_cache.lock().unwrap();
-        cache.remove(username);
-        log::info!("Cleared key package for user: {}", username);
-        Ok(())
-    }
-
-    /// Get all stored usernames (for debugging)
-    pub fn list_stored_users(&self) -> Vec<String> {
-        let cache = self.key_package_cache.lock().unwrap();
-        cache.keys().cloned().collect()
-    }
 }

@@ -70,9 +70,4 @@ impl PgpKeyManager {
         Ok(Some((secret_key, public_key)))
     }
 
-    /// Check if PGP keys exist for user
-    pub fn keys_exist(username: &str) -> bool {
-        let user_dir = Path::new("storage").join(username).join("pgp_keys");
-        user_dir.join("secret.asc").exists() && user_dir.join("public.asc").exists()
-    }
 }

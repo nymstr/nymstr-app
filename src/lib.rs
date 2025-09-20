@@ -14,4 +14,3 @@ pub mod log_buffer;
 
 // Re-export commonly used items for convenience
 pub use core::db::Db;
-pub use crypto::mls::MlsClient;

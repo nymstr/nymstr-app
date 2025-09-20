@@ -1,6 +1,6 @@
 //! High-level handler for user registration, login, messaging, and queries
 #![allow(dead_code)]
-use crate::crypto::{Crypto, EncryptedMessage, MlsClient};
+use crate::crypto::{Crypto, EncryptedMessage};
 use crate::crypto::pgp::PgpKeyManager;
 use crate::crypto::mls::persistence::MlsGroupPersistence;
 use mls_rs::{Client, ExtensionList, MlsMessage, CipherSuite, CryptoProvider, CipherSuiteProvider};

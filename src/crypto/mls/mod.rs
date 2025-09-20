@@ -22,8 +22,7 @@ pub mod test_storage;
 #[cfg(test)]
 pub mod test_client;
 
-pub use client::MlsClient;
-// GroupManager removed - groups handled by MlsClient
+pub use client::{PgpCredential, PgpIdentityProvider};
 pub use key_packages::KeyPackageManager;
 // Storage now handled by official mls-rs-provider-sqlite
 pub use types::{EncryptedMessage, MlsMessageType};
