@@ -9,6 +9,27 @@ pub struct User {
 }
 
 impl User {
+    pub fn new(username: &str) -> Self {
+        Self {
+            id: username.to_string(),
+            username: username.to_string(),
+            display_name: username.to_string(),
+            online: false,
+        }
+    }
+
+    pub fn with_display_name(username: &str, display_name: &str) -> Self {
+        Self {
+            id: username.to_string(),
+            username: username.to_string(),
+            display_name: display_name.to_string(),
+            online: false,
+        }
+    }
+
+    pub fn set_online(&mut self, online: bool) {
+        self.online = online;
+    }
 }
 
 #[cfg(test)]

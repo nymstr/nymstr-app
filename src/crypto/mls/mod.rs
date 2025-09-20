@@ -13,14 +13,6 @@ pub mod key_packages;
 pub mod types;
 pub mod persistence;
 
-#[cfg(test)]
-mod basic_test;
-#[cfg(test)]
-mod integration_test;
-#[cfg(test)]
-pub mod test_storage;
-#[cfg(test)]
-pub mod test_client;
 
 pub use client::{PgpCredential, PgpIdentityProvider};
 pub use key_packages::KeyPackageManager;

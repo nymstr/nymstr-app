@@ -223,7 +223,7 @@ impl App {
         while !connect_handle.is_finished() {
             terminal.draw(|f| self.draw(f))?;
             // advance spinner and throttle
-            std::thread::sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
             // update spinner index
             self.spinner_idx = self.spinner_idx.wrapping_add(1);
             // update splash glow and cycle fonts
@@ -349,7 +349,7 @@ impl App {
             // draw every frame
             terminal.draw(|f| self.draw(f))?;
             // small delay to reduce CPU
-            std::thread::sleep(Duration::from_millis(50));
+            tokio::time::sleep(Duration::from_millis(50)).await;
             if event::poll(Duration::from_millis(100))? {
                 if let CEvent::Key(key) = event::read()? {
                     // scroll log panel for non-chat phases
@@ -401,7 +401,7 @@ impl App {
                                     // poll task until completion, updating UI
                                     while !reg_handle.is_finished() {
                                         terminal.draw(|f| self.draw(f))?;
-                                        std::thread::sleep(Duration::from_millis(100));
+                                        tokio::time::sleep(Duration::from_millis(100)).await;
                                         self.spinner_idx = self.spinner_idx.wrapping_add(1);
                                     }
                                     // retrieve handler and result
@@ -462,7 +462,7 @@ impl App {
                                     self.phase = Phase::LoggingIn;
                                     while !login_handle.is_finished() {
                                         terminal.draw(|f| self.draw(f))?;
-                                        std::thread::sleep(Duration::from_millis(100));
+                                        tokio::time::sleep(Duration::from_millis(100)).await;
                                         self.spinner_idx = self.spinner_idx.wrapping_add(1);
                                     }
                                     match login_handle.await {
