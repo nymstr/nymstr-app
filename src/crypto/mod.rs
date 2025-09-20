@@ -8,8 +8,10 @@
 pub mod mls;
 pub mod pgp;
 pub mod utils;
+pub mod message_crypto;
 
 // Re-export main types
-pub use mls::{MlsClient, EncryptedMessage, MlsMessageType};
-pub use pgp::{PgpKeyManager, PgpSigner};
+pub use mls::{MlsClient, EncryptedMessage, MlsMessageType, MlsConversationManager};
+pub use pgp::{PgpKeyManager, PgpSigner, SecurePassphrase, VerifiedSignature};
 pub use utils::Crypto;
+pub use message_crypto::{MessageCrypto, VerifiedMessage};

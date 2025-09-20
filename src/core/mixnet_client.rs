@@ -102,6 +102,7 @@ impl MixnetService {
     }
 
     /// Register a new user: generate keys, send registration envelope
+    #[deprecated(note = "Use CLI registration flow through MessageHandler instead")]
     pub async fn register(&self, username: &str) -> Result<()> {
         // generate a new PGP keypair for user registration
         let (_secret_key, public_key) = Crypto::generate_pgp_keypair(username)

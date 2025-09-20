@@ -14,11 +14,12 @@ use mls_rs::{
 };
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
 use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use pgp::types::PublicKeyTrait;
 use std::sync::Arc;
 use base64::Engine;
 
 use crate::core::db::Db;
-use crate::crypto::pgp::{PgpKeyManager, PgpSigner};
+use crate::crypto::pgp::{PgpKeyManager, PgpSigner, SecurePassphrase};
 use super::types::{EncryptedMessage, MlsMessageType, MlsGroupInfo, ConversationInfo, ConversationType};
 use mls_rs_provider_sqlite::{
     SqLiteDataStorageEngine,
@@ -76,9 +77,17 @@ impl MlsClient {
         })
     }
 
-    /// Create a new MLS client and generate PGP keys
+    /// Create a new MLS client and generate PGP keys (legacy method)
+    #[deprecated(note = "Use new_with_generated_keys_secure with proper passphrase instead")]
     pub fn new_with_generated_keys(identity: &str, db: Arc<Db>) -> Result<Self> {
-        let (pgp_secret_key, pgp_public_key) = PgpKeyManager::generate_keypair(identity)?;
+        log::warn!("Using deprecated new_with_generated_keys method");
+        let passphrase = SecurePassphrase::generate_strong();
+        Self::new_with_generated_keys_secure(identity, db, &passphrase)
+    }
+
+    /// Create a new MLS client and generate secure PGP keys
+    pub fn new_with_generated_keys_secure(identity: &str, db: Arc<Db>, passphrase: &SecurePassphrase) -> Result<Self> {
+        let (pgp_secret_key, pgp_public_key) = PgpKeyManager::generate_keypair_secure(identity, passphrase)?;
         Self::new(identity, pgp_secret_key, pgp_public_key, db)
     }
 
@@ -351,9 +360,16 @@ impl MlsClient {
         &self.pgp_secret_key
     }
 
-    /// Sign data with PGP key (for backward compatibility)
+    /// Sign data with PGP key (legacy method)
+    #[deprecated(note = "Use pgp_sign_secure with proper passphrase instead")]
     pub fn pgp_sign(&self, data: &[u8]) -> Result<String> {
+        log::warn!("Using deprecated pgp_sign method");
         PgpSigner::sign_detached(&self.pgp_secret_key, data)
+    }
+
+    /// Sign data with PGP key using secure method
+    pub fn pgp_sign_secure(&self, data: &[u8], passphrase: &SecurePassphrase) -> Result<String> {
+        PgpSigner::sign_detached_secure(&self.pgp_secret_key, data, passphrase)
     }
 
     /// Export group state for backup/migration purposes
@@ -456,6 +472,64 @@ impl IntoAnyError for PgpIdentityError {
     }
 }
 
+impl PgpIdentityProvider {
+    /// Validate a PGP credential thoroughly
+    fn validate_pgp_credential(pgp_cred: &PgpCredential) -> Result<(), String> {
+        use pgp::composed::Deserializable;
+        use crate::crypto::pgp::PgpSigner;
+
+        // Check basic fields
+        if pgp_cred.user_id.is_empty() {
+            return Err("Empty user ID in PGP credential".to_string());
+        }
+
+        if pgp_cred.public_key_armored.is_empty() {
+            return Err("Empty public key in PGP credential".to_string());
+        }
+
+        // Parse and validate the PGP public key
+        let (public_key, _) = pgp::composed::SignedPublicKey::from_string(&pgp_cred.public_key_armored)
+            .map_err(|e| format!("Invalid PGP key format: {}", e))?;
+
+        // Validate that the key is suitable for signing
+        if let Err(e) = PgpSigner::validate_signing_key(&public_key) {
+            return Err(format!("PGP key validation failed: {}", e));
+        }
+
+        // Verify the user ID matches the key
+        let key_user_ids: Vec<String> = public_key.details.users.iter()
+            .map(|user| String::from_utf8_lossy(user.id.id()).to_string())
+            .collect();
+
+        if !key_user_ids.iter().any(|uid| uid.contains(&pgp_cred.user_id)) {
+            return Err(format!(
+                "User ID '{}' not found in PGP key. Available user IDs: {:?}",
+                pgp_cred.user_id, key_user_ids
+            ));
+        }
+
+        // Additional security checks
+        let key_created = public_key.primary_key.created_at().timestamp() as u32;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as u32;
+
+        // Check if key is too old (more than 10 years)
+        if now.saturating_sub(key_created) > (10 * 365 * 24 * 60 * 60) {
+            return Err("PGP key is older than 10 years, consider renewal".to_string());
+        }
+
+        // Check if key was created in the future (clock skew protection)
+        if key_created > now + (24 * 60 * 60) { // Allow 1 day clock skew
+            return Err("PGP key has invalid creation time (future)".to_string());
+        }
+
+        log::info!("PGP credential validation passed for user: {}", pgp_cred.user_id);
+        Ok(())
+    }
+}
+
 impl IdentityProvider for PgpIdentityProvider {
     type Error = PgpIdentityError;
 
@@ -481,7 +555,10 @@ impl IdentityProvider for PgpIdentityProvider {
                     return Err(PgpIdentityError("Empty public key in PGP credential".to_string()));
                 }
 
-                // TODO: Add PGP key format validation and signature verification
+                // Validate PGP credential properly
+                if let Err(e) = Self::validate_pgp_credential(&pgp_cred) {
+                    return Err(PgpIdentityError(format!("PGP credential validation failed: {}", e)));
+                }
                 return Ok(());
             }
         }

@@ -8,5 +8,5 @@
 pub mod keypair;
 pub mod signing;
 
-pub use keypair::PgpKeyManager;
-pub use signing::PgpSigner;
+pub use keypair::{PgpKeyManager, SecurePassphrase};
+pub use signing::{PgpSigner, VerifiedSignature};

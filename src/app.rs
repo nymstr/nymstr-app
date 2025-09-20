@@ -700,10 +700,10 @@ impl App {
                             match key.code {
                                 KeyCode::Char('s') => {
                                     // Get server statistics
-                                    if let Some(mut handler) = self.handler.take() {
+                                    if let Some(handler) = self.handler.take() {
                                         let group_addr = self.group_server_address.clone();
                                         let h = tokio::spawn(async move {
-                                            let res = handler.get_group_stats(&group_addr).await;
+                                            let res = handler.service.get_group_stats(&group_addr).await;
                                             // Convert () to bool for consistency
                                             (handler, res.map(|_| true))
                                         });
@@ -1238,7 +1238,8 @@ impl App {
     /// Load chat history from database and populate the chat screen
     async fn load_chat_history_to_screen(&mut self) -> io::Result<()> {
         if let Some(handler) = &self.handler {
-            match handler.load_chat_history().await {
+            if let Some(current_user) = &handler.current_user {
+                match handler.db.load_chat_history(current_user).await {
                 Ok(chat_history) => {
                     if let Some(chat) = self.screen.as_chat_mut() {
                         // Clear existing data
@@ -1283,6 +1284,7 @@ impl App {
                 Err(e) => {
                     log::error!("Failed to load chat history: {}", e);
                 }
+            }
             }
         }
         Ok(())

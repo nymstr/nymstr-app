@@ -1,23 +1,24 @@
 //! High-level handler for user registration, login, messaging, and queries
 #![allow(dead_code)]
-use crate::crypto::{Crypto, EncryptedMessage, MlsClient};
-use crate::crypto::pgp::PgpKeyManager;
+use crate::crypto::{Crypto, EncryptedMessage, MlsConversationManager, SecurePassphrase, PgpKeyManager};
 use crate::crypto::mls::persistence::MlsGroupPersistence;
-use mls_rs::{Client, ExtensionList, MlsMessage, CipherSuite, CryptoProvider, CipherSuiteProvider};
+use crate::core::message_router::{MessageRouter, MessageRoute};
+use crate::core::auth_handler::AuthenticationHandler;
+use crate::core::chat_handler::{ChatHandler, ChatResult};
+use mls_rs::{Client, ExtensionList, CipherSuite, CryptoProvider, CipherSuiteProvider};
 use mls_rs::crypto::{SignatureSecretKey, SignaturePublicKey};
 use mls_rs::client_builder::MlsConfig;
 use mls_rs::identity::MlsCredential;
-use mls_rs::group::ReceivedMessage;
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
 use mls_rs_provider_sqlite::{SqLiteDataStorageEngine, connection_strategy::FileConnectionStrategy};
 use crate::crypto::mls::KeyPackageManager;
-// TODO: Update message handler to use MlsClient instead of removed GroupManager
 use crate::core::db::Db;
 use crate::core::mixnet_client::{Incoming, MixnetService};
-use anyhow::{Result, anyhow};
+use anyhow::anyhow;
 use chrono::Utc;
-use serde_json::{Value, json};
+use serde_json::json;
 use tokio::sync::mpsc::Receiver;
+use std::sync::Arc;
 
 use pgp::composed::{SignedSecretKey, SignedPublicKey};
 
@@ -41,6 +42,8 @@ pub struct MessageHandler {
     pub pgp_public_key: Option<SignedPublicKey>,
     /// Optional user's PGP secret key for signing
     pub pgp_secret_key: Option<SignedSecretKey>,
+    /// Secure passphrase for PGP operations
+    pub pgp_passphrase: Option<SecurePassphrase>,
     /// MLS key package manager
     pub key_package_manager: KeyPackageManager,
     /// MLS group state persistence
@@ -67,8 +70,16 @@ impl MessageHandler {
             nym_address: None,
             pgp_public_key: None,
             pgp_secret_key: None,
+            pgp_passphrase: None,
             mls_persistence: None, // Will be set when user logs in
         })
+    }
+
+    /// Set PGP keys for the current session (called by CLI after key management)
+    pub fn set_pgp_keys(&mut self, secret_key: SignedSecretKey, public_key: SignedPublicKey, passphrase: SecurePassphrase) {
+        self.pgp_secret_key = Some(secret_key);
+        self.pgp_public_key = Some(public_key);
+        self.pgp_passphrase = Some(passphrase);
     }
 
     /// Load or generate persistent MLS signature keys for a user
@@ -158,35 +169,51 @@ impl MessageHandler {
     }
 
     /// Register a new user via the mixnet service, awaiting server responses
+    /// Note: PGP keys must be set via set_pgp_keys() before calling this
     pub async fn register_user(&mut self, username: &str) -> anyhow::Result<bool> {
-        // Generate PGP keypair and initialize MLS crypto
-        let (secret_key, public_key) = Crypto::generate_pgp_keypair(username)?;
-        // Store keys in handler for signing
-        self.pgp_public_key = Some(public_key.clone());
-        self.pgp_secret_key = Some(secret_key.clone());
+        // Ensure PGP keys are available
+        let public_key = self.pgp_public_key.as_ref()
+            .ok_or_else(|| anyhow!("PGP keys must be set before registration"))?;
+
         // Initialize MLS storage path for client creation
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
+
         // Get armored public key
-        let public_key_armored = Crypto::pgp_public_key_armored(&public_key)?;
+        let public_key_armored = Crypto::pgp_public_key_armored(public_key)?;
+
         // Persist and send the public key in armored format
         self.db.register_user(username, &public_key_armored).await?;
         self.service
             .send_registration_request(username, &public_key_armored)
             .await?;
-        // Await server challenge and responses with timeout and Ctrl+C handling
+
+        // Create authentication handler for processing responses
+        let auth_handler = AuthenticationHandler::new(
+            self.db.clone(),
+            Arc::new(self.service.clone()),
+            self.pgp_secret_key.clone(),
+            self.pgp_public_key.clone(),
+            self.pgp_passphrase.clone(),
+        );
+
+        // Await server challenge and responses using modular message processing
         let timeout_duration = std::time::Duration::from_secs(30);
         loop {
             tokio::select! {
                 incoming = self.incoming_rx.recv() => {
                     if let Some(incoming) = incoming {
-                        let env = incoming.envelope;
+                        let env = &incoming.envelope;
                         let action = env.action.as_str();
+
                         match action {
                             "challenge" => {
                                 if let Some(context) = env.payload.get("context").and_then(|v| v.as_str()) {
                                     if context == "registration" {
                                         if let Some(nonce) = env.payload.get("nonce").and_then(|v| v.as_str()) {
-                                            self.process_register_challenge(username, nonce).await?;
+                                            if let Err(e) = auth_handler.process_register_challenge(username, nonce).await {
+                                                log::error!("Registration challenge failed: {}", e);
+                                                return Ok(false);
+                                            }
                                         }
                                     }
                                 }
@@ -195,12 +222,27 @@ impl MessageHandler {
                                 if let Some(context) = env.payload.get("context").and_then(|v| v.as_str()) {
                                     if context == "registration" {
                                         if let Some(result) = env.payload.get("result").and_then(|v| v.as_str()) {
-                                            return self.process_register_response(username, result).await;
+                                            match auth_handler.process_register_response(username, result).await {
+                                                Ok(success) => {
+                                                    if success {
+                                                        self.db.init_user(username).await?;
+                                                        self.current_user = Some(username.to_string());
+                                                    }
+                                                    return Ok(success);
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Registration response failed: {}", e);
+                                                    return Ok(false);
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                            _ => {}
+                            _ => {
+                                // Process other messages normally through the modular system
+                                self.process_received_message(incoming).await;
+                            }
                         }
                     } else {
                         // Channel closed
@@ -220,46 +262,83 @@ impl MessageHandler {
     }
 
     /// Login an existing user via the mixnet service, awaiting server response
+    /// Note: PGP keys must be set via set_pgp_keys() before calling this
     pub async fn login_user(&mut self, username: &str) -> anyhow::Result<bool> {
         // Ensure current user is set and load or generate PGP keys for this session
         self.current_user = Some(username.to_string());
 
-        // Try to load existing PGP keys, or generate new ones if they don't exist
-        let (secret_key, public_key) = if let Some((existing_secret, existing_public)) = PgpKeyManager::load_keypair(username)? {
-            log::info!("Loaded existing PGP keys for user: {}", username);
-            (existing_secret, existing_public)
+        // Get passphrase from environment variable or generate one
+        let passphrase = if let Ok(env_passphrase) = std::env::var("NYMSTR_PGP_PASSPHRASE") {
+            SecurePassphrase::new(env_passphrase)
         } else {
-            log::info!("Generating new PGP keys for user: {}", username);
-            let (new_secret, new_public) = Crypto::generate_pgp_keypair(username)?;
-            // Save the newly generated keys for future use
-            PgpKeyManager::save_keypair(username, &new_secret, &new_public)?;
-            log::info!("Saved new PGP keys for user: {}", username);
+            log::warn!("NYMSTR_PGP_PASSPHRASE not set, generating random passphrase");
+            SecurePassphrase::generate_strong()
+        };
+
+        // Try to load existing PGP keys, or generate new ones if they don't exist
+        let (secret_key, public_key) = if PgpKeyManager::keys_exist(username) {
+            // Keys exist but we need to handle the fact that they might have different passphrases
+            // TODO: In production, prompt user for passphrase and use load_keypair_secure
+            // For now, try legacy load first for backwards compatibility, then fall back to secure generation
+            #[allow(deprecated)]
+            if let Some((existing_secret, existing_public)) = PgpKeyManager::load_keypair(username)? {
+                log::info!("Loaded existing PGP keys for user: {}", username);
+                (existing_secret, existing_public)
+            } else {
+                // If legacy load fails, generate new secure keys
+                log::info!("Legacy keys couldn't be loaded, generating new secure PGP keys for user: {}", username);
+                let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
+                PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
+                log::info!("Saved new secure PGP keys for user: {}", username);
+                (new_secret, new_public)
+            }
+        } else {
+            log::info!("Generating new secure PGP keys for user: {}", username);
+            let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
+            // Save the newly generated keys securely
+            PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
+            log::info!("Saved new secure PGP keys for user: {}", username);
             (new_secret, new_public)
         };
 
         self.pgp_public_key = Some(public_key.clone());
         self.pgp_secret_key = Some(secret_key.clone());
+        self.pgp_passphrase = Some(passphrase.clone());
         // Initialize MLS storage path for client creation
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
         // Initialize MLS group persistence
         self.mls_persistence = Some(MlsGroupPersistence::new(username.to_string(), self.db.clone()));
 
+        // Create authentication handler for processing responses
+        let auth_handler = AuthenticationHandler::new(
+            self.db.clone(),
+            Arc::new(self.service.clone()),
+            Some(secret_key),
+            Some(public_key),
+            Some(passphrase),
+        );
+
         // Send initial login request
         self.service.send_login_request(username).await?;
-        // Await server challenge and responses with timeout and Ctrl+C handling
+
+        // Await server challenge and responses using modular message processing
         let timeout_duration = std::time::Duration::from_secs(30);
         loop {
             tokio::select! {
                 incoming = self.incoming_rx.recv() => {
                     if let Some(incoming) = incoming {
-                        let env = incoming.envelope;
+                        let env = &incoming.envelope;
                         let action = env.action.as_str();
+
                         match action {
                             "challenge" => {
                                 if let Some(context) = env.payload.get("context").and_then(|v| v.as_str()) {
                                     if context == "login" {
                                         if let Some(nonce) = env.payload.get("nonce").and_then(|v| v.as_str()) {
-                                            self.process_login_challenge(nonce).await?;
+                                            if let Err(e) = auth_handler.process_login_challenge(username, nonce).await {
+                                                log::error!("Login challenge failed: {}", e);
+                                                return Ok(false);
+                                            }
                                         }
                                     }
                                 }
@@ -268,12 +347,27 @@ impl MessageHandler {
                                 if let Some(context) = env.payload.get("context").and_then(|v| v.as_str()) {
                                     if context == "login" {
                                         if let Some(result) = env.payload.get("result").and_then(|v| v.as_str()) {
-                                            return self.process_login_response(username, result).await;
+                                            match auth_handler.process_login_response(username, result).await {
+                                                Ok(success) => {
+                                                    if success {
+                                                        self.db.init_user(username).await?;
+                                                        self.current_user = Some(username.to_string());
+                                                    }
+                                                    return Ok(success);
+                                                }
+                                                Err(e) => {
+                                                    log::error!("Login response failed: {}", e);
+                                                    return Ok(false);
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
-                            _ => {}
+                            _ => {
+                                // Process other messages normally through the modular system
+                                self.process_received_message(incoming).await;
+                            }
                         }
                     } else {
                         // Channel closed
@@ -390,10 +484,10 @@ impl MessageHandler {
         };
 
         // Sign the message content for authentication (PGP signature)
-        let signature = if let Some(secret_key) = &self.pgp_secret_key {
-            Crypto::pgp_sign_detached(secret_key, message_content.as_bytes())?
+        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+            Crypto::pgp_sign_detached_secure(secret_key, message_content.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key not available for signing"));
+            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
         };
 
         // Send MLS encrypted message using unified format
@@ -465,10 +559,10 @@ impl MessageHandler {
 
         // Sign with PGP
         let payload_str = payload.to_string();
-        let signature = if let Some(secret_key) = &self.pgp_secret_key {
-            Crypto::pgp_sign_detached(secret_key, payload_str.as_bytes())?
+        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+            Crypto::pgp_sign_detached_secure(secret_key, payload_str.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key not available for signing"));
+            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
         };
         
         // Send encrypted handshake
@@ -489,10 +583,10 @@ impl MessageHandler {
         let our_key_package = client.generate_key_package_message(Default::default(), Default::default(), None)?;
 
         // Sign the key package request
-        let signature = if let Some(secret_key) = &self.pgp_secret_key {
-            Crypto::pgp_sign_detached(secret_key, &our_key_package.to_bytes()?)?
+        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+            Crypto::pgp_sign_detached_secure(secret_key, &our_key_package.to_bytes()?, passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key not available for signing"));
+            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
         };
 
         // Send key package request to recipient
@@ -555,10 +649,10 @@ impl MessageHandler {
                                     let welcome_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &welcome_bytes);
                                     let group_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, group.group_id());
 
-                                    let welcome_signature = if let Some(secret_key) = &self.pgp_secret_key {
-                                        Crypto::pgp_sign_detached(secret_key, &welcome_bytes)?
+                                    let welcome_signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+                                        Crypto::pgp_sign_detached_secure(secret_key, &welcome_bytes, passphrase)?
                                     } else {
-                                        return Err(anyhow!("PGP secret key not available for signing"));
+                                        return Err(anyhow!("PGP secret key or passphrase not available for signing"));
                                     };
 
                                     self.service.send_group_welcome(
@@ -592,311 +686,91 @@ impl MessageHandler {
         }
     }
 
-    /// Handle incoming key package request
-    async fn handle_key_package_request(&mut self, sender: &str, sender_key_package: &str) -> anyhow::Result<()> {
-        let user = self.current_user.as_deref().unwrap_or("");
 
-        // Create MLS client
-        let client = self.create_mls_client().await?;
-
-        // Validate the sender's key package
-        if !self.key_package_manager.validate_key_package(sender_key_package)? {
-            return Err(anyhow!("Invalid key package from {}", sender));
-        }
-
-        // Store the sender's key package
-        self.key_package_manager.store_key_package(sender, sender_key_package)?;
-
-        // Generate our key package
-        let our_key_package = client.generate_key_package_message(Default::default(), Default::default(), None)?;
-
-        // Sign the response
-        let signature = if let Some(secret_key) = &self.pgp_secret_key {
-            Crypto::pgp_sign_detached(secret_key, &our_key_package.to_bytes()?)?
-        } else {
-            return Err(anyhow!("PGP secret key not available for signing"));
-        };
-
-        // Send key package response
-        let our_key_package_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package.to_bytes()?);
-        self.service.send_key_package_response(
-            user, sender, sender_key_package, &our_key_package_b64, &signature
-        ).await?;
-
-        log::info!("Sent key package response to {}", sender);
-        Ok(())
-    }
-
-    /// Handle incoming group welcome message
-    async fn handle_group_welcome(&mut self, sender: &str, welcome_message: &str, group_id: &str) -> anyhow::Result<()> {
-        let user = self.current_user.as_deref().unwrap_or("");
-
-        // Create MLS client
-        let client = self.create_mls_client().await?;
-
-        // Decode welcome message
-        let welcome_bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, welcome_message)
-            .map_err(|e| anyhow!("Failed to decode welcome message: {}", e))?;
-        let welcome_msg = mls_rs::MlsMessage::from_bytes(&welcome_bytes)?;
-
-        // Join the group with the welcome message
-        let (mut group, _) = client.join_group(None, &welcome_msg, None)?;
-
-        // Save group state
-        group.write_to_storage()?;
-
-        // Store conversation state
-        // TODO: Use MlsClient to store conversation state
-        // self.group_manager.store_conversation_state(
-        //     user, &conversation_info, &group_state
-        // ).await?;
-
-        // Send confirmation
-        let signature = if let Some(secret_key) = &self.pgp_secret_key {
-            Crypto::pgp_sign_detached(secret_key, group_id.as_bytes())?
-        } else {
-            return Err(anyhow!("PGP secret key not available for signing"));
-        };
-        self.service.send_group_join_response(user, sender, group_id, true, &signature).await?;
-
-        log::info!("Successfully joined MLS conversation with {}", sender);
-        Ok(())
-    }
-
-    // Helpers to keep the match arms clean:
-    async fn process_register_challenge(
-        &mut self,
-        username: &str,
-        nonce: &str,
-    ) -> anyhow::Result<()> {
-        let secret_key = self.pgp_secret_key.as_ref().unwrap();
-        let signature = Crypto::pgp_sign_detached(secret_key, nonce.as_bytes())?;
-        self.service
-            .send_registration_response(username, &signature)
-            .await?;
-        Ok(())
-    }
-
-    async fn process_register_response(
-        &mut self,
-        username: &str,
-        result: &str,
-    ) -> anyhow::Result<bool> {
-        if result == "success" {
-            // MLS crypto is already initialized during registration
-            self.db.init_user(username).await?;
-            self.current_user = Some(username.to_string());
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    async fn process_login_challenge(&mut self, nonce: &str) -> anyhow::Result<()> {
-        let secret_key = self.pgp_secret_key.as_ref().unwrap();
-        let signature = Crypto::pgp_sign_detached(secret_key, nonce.as_bytes())?;
-        self.service
-            .send_login_response(self.current_user.as_deref().unwrap(), &signature)
-            .await?;
-        Ok(())
-    }
-
-    async fn process_login_response(
-        &mut self,
-        username: &str,
-        result: &str,
-    ) -> anyhow::Result<bool> {
-        if result == "success" {
-            self.db.init_user(username).await?;
-            self.current_user = Some(username.to_string());
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Handle the queryResponse "action" from the server (context = "query").
-    async fn process_query_response(
-        &mut self,
-        content: &str,
-    ) -> anyhow::Result<Option<(String, String)>> {
-        if let Ok(v) = serde_json::from_str::<Value>(content) {
-            if let (Some(user), Some(pk)) = (
-                v.get("username").and_then(|u| u.as_str()),
-                v.get("publicKey").and_then(|k| k.as_str()),
-            ) {
-                if let Some(me) = &self.current_user {
-                    let _ = self.db.add_contact(me, user, pk).await;
-                }
-                return Ok(Some((user.to_string(), pk.to_string())));
-            }
-        }
-        Ok(None)
-    }
 
     /// Dispatch a single incoming envelope and return decrypted chat messages.
     pub async fn process_received_message(&mut self, incoming: Incoming) -> Vec<(String, String)> {
-        let ts = incoming.ts;
-        match self.decrypt_and_verify(incoming).await {
-            Ok(Some((sender, ChatMsg::Text(msg)))) => {
-                let user = self.current_user.as_deref().unwrap_or("");
-                let _ = self.db.save_message(user, &sender, false, &msg, ts).await;
-                vec![(sender, msg)]
-            }
-            Ok(Some((_sender, ChatMsg::Handshake(addr)))) => {
-                self.nym_address = Some(addr);
-                vec![]
-            }
-            _ => vec![],
-        }
-    }
+        // Route the message to appropriate handler
+        let route = MessageRouter::route_message(&incoming);
 
-    async fn decrypt_and_verify(
-        &mut self,
-        incoming: Incoming,
-    ) -> Result<Option<(String, ChatMsg)>> {
-        let env = incoming.envelope;
-        // Handle server responses (these are processed elsewhere via incoming_rx channel)
-        match env.action.as_str() {
-            "challenge" | "challengeResponse" | "queryResponse" | "loginResponse" | "sendResponse" => {
-                log::debug!("Received server response action: {}", env.action);
-                return Ok(None);
-            }
-            "keyPackageRequest" => {
-                // Handle incoming key package request for MLS handshake
-                if let Some(sender_key_package) = env.payload.get("senderKeyPackage").and_then(|v| v.as_str()) {
-                    if let Err(e) = self.handle_key_package_request(&env.sender, sender_key_package).await {
-                        log::error!("Failed to handle key package request from {}: {}", env.sender, e);
+        // Only process messages that should be handled immediately
+        if !MessageRouter::should_process_immediately(&route) {
+            log::debug!("Message routed to {}, not processing immediately", MessageRouter::route_description(&route));
+            return vec![];
+        }
+
+        // Create handlers with current state
+        let auth_handler = AuthenticationHandler::new(
+            self.db.clone(),
+            Arc::new(self.service.clone()),
+            self.pgp_secret_key.clone(),
+            self.pgp_public_key.clone(),
+            self.pgp_passphrase.clone(),
+        );
+
+        let mut mls_manager = MlsConversationManager::new(
+            self.db.clone(),
+            Arc::new(self.service.clone()),
+            self.current_user.clone(),
+            self.pgp_secret_key.clone(),
+            self.pgp_public_key.clone(),
+            self.pgp_passphrase.clone(),
+            self.mls_storage_path.clone(),
+        );
+
+        let chat_handler = ChatHandler::new(self.db.clone(), self.current_user.clone());
+
+        // Process based on route
+        match route {
+            MessageRoute::Chat => {
+                match chat_handler.handle_chat_message(&incoming.envelope).await {
+                    Ok(ChatResult::TextMessage { sender, content }) => {
+                        vec![(sender, content)]
+                    }
+                    Ok(_) => vec![],
+                    Err(e) => {
+                        log::error!("Failed to process chat message: {}", e);
+                        vec![]
                     }
                 }
-                return Ok(None);
             }
-            "groupWelcome" => {
-                // Handle incoming group welcome message
-                if let (Some(welcome_message), Some(group_id)) = (
-                    env.payload.get("welcomeMessage").and_then(|v| v.as_str()),
-                    env.payload.get("groupId").and_then(|v| v.as_str())
-                ) {
-                    if let Err(e) = self.handle_group_welcome(&env.sender, welcome_message, group_id).await {
-                        log::error!("Failed to handle group welcome from {}: {}", env.sender, e);
+            MessageRoute::Handshake => {
+                match chat_handler.handle_handshake(&incoming.envelope).await {
+                    Ok(ChatResult::Handshake { nym_address }) => {
+                        self.nym_address = Some(nym_address);
+                        vec![]
+                    }
+                    Ok(_) => vec![],
+                    Err(e) => {
+                        log::error!("Failed to process handshake: {}", e);
+                        vec![]
                     }
                 }
-                return Ok(None);
             }
-            "send" | "incomingMessage" => {
-                // Continue processing as chat message
+            MessageRoute::MlsProtocol => {
+                // Handle MLS protocol messages
+                match mls_manager.handle_mls_protocol_message(&incoming.envelope).await {
+                    Ok((sender, message)) => {
+                        if !sender.is_empty() && !message.is_empty() {
+                            vec![(sender, message)]
+                        } else {
+                            vec![]
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to process MLS protocol message: {}", e);
+                        vec![]
+                    }
+                }
             }
             _ => {
-                log::warn!("Unknown action received: {}", env.action);
-                return Ok(None);
+                log::debug!("Unhandled message route: {:?}", route);
+                vec![]
             }
         }
-        
-        // Check if this is a message type in the unified format
-        if env.message_type != "message" {
-            return Ok(None);
-        }
-
-        // Extract MLS message from payload
-        let conversation_id = env.payload.get("conversation_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing conversation_id in message payload"))?;
-
-        let mls_message = env.payload.get("mls_message")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing mls_message in message payload"))?;
-
-        // For unified format, sender information is in the envelope
-        let sender = env.sender.clone();
-
-        // Try to decrypt the MLS message
-        // Create a payload for MLS decryption that matches expected format
-        let mls_payload = json!({
-            "body": {
-                "conversation_id": conversation_id,
-                "mls_message": mls_message
-            },
-            "sender": sender
-        });
-
-        return self.decrypt_mls_message(mls_payload, sender).await;
     }
-    
-    async fn decrypt_mls_message(
-        &self,
-        payload: Value,
-        sender: String,
-    ) -> Result<Option<(String, ChatMsg)>> {
-        let body = &payload["body"];
-        
-        // Extract MLS message components
-        let conversation_id_b64 = body["conversation_id"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Missing conversation_id"))?;
-        let mls_message_b64 = body["mls_message"]
-            .as_str()
-            .ok_or_else(|| anyhow!("Missing mls_message"))?;
-        
-        let conversation_id = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, conversation_id_b64)?;
-        let mls_message = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, mls_message_b64)?;
-        
-        // Create MLS client
-        let client = self.create_mls_client().await?;
 
-        // Parse MLS message
-        let mls_msg = mls_rs::MlsMessage::from_bytes(&mls_message)?;
 
-        // Load the group for this conversation
-        log::info!("Attempting to load MLS group for conversation_id: {:?} (as string: '{}')",
-                   conversation_id, String::from_utf8_lossy(&conversation_id));
-        let mut group = match client.load_group(&conversation_id) {
-            Ok(group) => {
-                log::info!("Successfully loaded MLS group for conversation");
-                group
-            },
-            Err(e) => {
-                log::error!("Failed to load MLS group for conversation: {:?}", e);
-                return Err(anyhow!("No MLS group found for conversation: {:?}", e));
-            },
-        };
-
-        // Process the incoming message
-        log::info!("About to process incoming MLS message with group.process_incoming_message()");
-        let processed = match group.process_incoming_message(mls_msg) {
-            Ok(processed) => {
-                log::info!("Successfully processed incoming MLS message");
-                processed
-            },
-            Err(e) => {
-                log::error!("Failed to process incoming MLS message: {:?}", e);
-                return Err(anyhow!("Failed to process MLS message: {:?}", e));
-            },
-        };
-
-        // Save group state after processing to MLS internal storage
-        group.write_to_storage()?;
-        log::info!("Saved MLS group state to persistent storage after processing message");
-
-        // Extract decrypted content if it's an application message
-        let decrypted = match processed {
-            ReceivedMessage::ApplicationMessage(app_msg) => app_msg.data().to_vec(),
-            _ => return Ok(None), // Not an application message
-        };
-        let text = String::from_utf8(decrypted)?;
-        let msg_val: Value = serde_json::from_str(&text)?;
-
-        if let Some(msg_type) = msg_val["type"].as_i64() {
-            let content = msg_val["message"].as_str().unwrap_or("").to_string();
-            let chat_msg = match msg_type {
-                0 => ChatMsg::Text(content),
-                1 => ChatMsg::Handshake(content),
-                _ => return Ok(None),
-            };
-            Ok(Some((sender, chat_msg)))
-        } else {
-            Ok(None)
-        }
-    }
 
     /// Authenticate with group server (register + connect)
     pub async fn authenticate_group(&mut self, username: &str, group_server_address: &str) -> anyhow::Result<bool> {
@@ -932,37 +806,8 @@ impl MessageHandler {
         self.service.send_group_message(message, group_server_address).await?;
         Ok(())
     }
-
-    /// Get group server fanout statistics
-    pub async fn get_group_stats(&mut self, group_server_address: &str) -> anyhow::Result<()> {
-        self.service.get_group_stats(group_server_address).await?;
-        Ok(())
-    }
-
-    /// Load all contacts and their message history for the current user
-    pub async fn load_chat_history(&self) -> anyhow::Result<Vec<(String, Vec<(bool, String, chrono::DateTime<chrono::Utc>)>)>> {
-        let user = self.current_user.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No user logged in"))?;
-
-        // Get all contacts for this user
-        let contacts = self.db.load_contacts(user).await?;
-
-        let mut chat_history = Vec::new();
-
-        for (contact_name, _contact_pk) in contacts {
-            // Load messages for each contact
-            let messages = self.db.load_messages(user, &contact_name).await?;
-            chat_history.push((contact_name, messages));
-        }
-
-        Ok(chat_history)
-    }
 }
 
-enum ChatMsg {
-    Text(String),
-    Handshake(String),
-}
 
 #[cfg(test)]
 mod tests {
@@ -998,21 +843,6 @@ mod tests {
         assert!(matches!(encrypted.message_type, crate::crypto::MlsMessageType::Application));
     }
 
-    #[test]
-    fn test_chat_msg_enum() {
-        let text_msg = ChatMsg::Text("hello".to_string());
-        let handshake_msg = ChatMsg::Handshake("handshake_data".to_string());
-        
-        match text_msg {
-            ChatMsg::Text(ref content) => assert_eq!(content, "hello"),
-            _ => panic!("Expected text message"),
-        }
-        
-        match handshake_msg {
-            ChatMsg::Handshake(ref content) => assert_eq!(content, "handshake_data"),
-            _ => panic!("Expected handshake message"),
-        }
-    }
 
     #[tokio::test]
     async fn test_json_parsing_for_registration() {

@@ -12,6 +12,7 @@ pub mod key_packages;
 // Removed custom storage - now using official mls-rs-provider-sqlite
 pub mod types;
 pub mod persistence;
+pub mod conversation_manager;
 
 #[cfg(test)]
 mod basic_test;
@@ -27,3 +28,4 @@ pub use client::MlsClient;
 pub use key_packages::KeyPackageManager;
 // Storage now handled by official mls-rs-provider-sqlite
 pub use types::{EncryptedMessage, MlsMessageType};
+pub use conversation_manager::MlsConversationManager;

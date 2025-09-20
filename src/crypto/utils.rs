@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use crate::crypto::pgp::SecurePassphrase;
 
 /// Basic crypto utilities: file operations and key management
 #[derive(Clone, Copy)]
@@ -51,17 +52,54 @@ impl Crypto {
     }
 
     /// Generate PGP keypair for given user ID (backward compatibility)
+    #[deprecated(note = "Use generate_pgp_keypair_secure with proper passphrase instead")]
     pub fn generate_pgp_keypair(user_id: &str) -> Result<(SignedSecretKey, SignedPublicKey)> {
         crate::crypto::pgp::PgpKeyManager::generate_keypair(user_id)
     }
 
-    /// Get armored public key from PGP certificate (backward compatibility)
+    /// Generate secure PGP keypair with Ed25519 keys
+    pub fn generate_pgp_keypair_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
+        crate::crypto::pgp::PgpKeyManager::generate_keypair_secure(user_id, passphrase)
+    }
+
+    /// Generate secure PGP keypair with strong RSA keys (fallback)
+    pub fn generate_pgp_keypair_rsa_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
+        crate::crypto::pgp::PgpKeyManager::generate_keypair_rsa_secure(user_id, passphrase)
+    }
+
+    /// Get armored public key from PGP certificate
     pub fn pgp_public_key_armored(public_key: &SignedPublicKey) -> Result<String> {
         crate::crypto::pgp::PgpKeyManager::public_key_armored(public_key)
     }
 
     /// Create detached PGP signature (backward compatibility)
+    #[deprecated(note = "Use pgp_sign_detached_secure with proper passphrase instead")]
     pub fn pgp_sign_detached(secret_key: &SignedSecretKey, data: &[u8]) -> Result<String> {
         crate::crypto::pgp::PgpSigner::sign_detached(secret_key, data)
+    }
+
+    /// Create secure detached PGP signature
+    pub fn pgp_sign_detached_secure(secret_key: &SignedSecretKey, data: &[u8], passphrase: &SecurePassphrase) -> Result<String> {
+        crate::crypto::pgp::PgpSigner::sign_detached_secure(secret_key, data, passphrase)
+    }
+
+    /// Verify detached PGP signature
+    pub fn pgp_verify_detached(public_key: &SignedPublicKey, data: &[u8], signature: &str) -> Result<crate::crypto::pgp::VerifiedSignature> {
+        crate::crypto::pgp::PgpSigner::verify_detached(public_key, data, signature)
+    }
+
+    /// Create a secure passphrase from user input
+    pub fn create_secure_passphrase() -> Result<SecurePassphrase> {
+        SecurePassphrase::from_user_input()
+    }
+
+    /// Generate a strong random passphrase
+    pub fn generate_strong_passphrase() -> SecurePassphrase {
+        SecurePassphrase::generate_strong()
+    }
+
+    /// Parse and validate a PGP public key
+    pub fn parse_pgp_public_key(public_key_armored: &str) -> Result<SignedPublicKey> {
+        crate::crypto::pgp::PgpKeyManager::parse_public_key(public_key_armored)
     }
 }

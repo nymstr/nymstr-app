@@ -4,6 +4,7 @@
 //! including cryptographic operations, database management, and user interface components.
 
 pub mod app;
+pub mod cli;
 pub mod core;
 pub mod crypto;
 pub mod event;
@@ -11,6 +12,9 @@ pub mod model;
 pub mod screen;
 pub mod ui;
 pub mod log_buffer;
+
+#[cfg(test)]
+pub mod test_pgp;
 
 // Re-export commonly used items for convenience
 pub use core::db::Db;

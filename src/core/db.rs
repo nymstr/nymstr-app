@@ -351,6 +351,22 @@ impl Db {
             .map(|r| r.try_get("conversation_id").unwrap())
             .collect())
     }
+
+    /// Load complete chat history for a user (all contacts and their messages)
+    pub async fn load_chat_history(&self, user: &str) -> Result<Vec<(String, Vec<(bool, String, chrono::DateTime<chrono::Utc>)>)>> {
+        // Get all contacts for this user
+        let contacts = self.load_contacts(user).await?;
+
+        let mut chat_history = Vec::new();
+
+        for (contact_name, _contact_pk) in contacts {
+            // Load messages for each contact
+            let messages = self.load_messages(user, &contact_name).await?;
+            chat_history.push((contact_name, messages));
+        }
+
+        Ok(chat_history)
+    }
 }
 
 #[cfg(test)]

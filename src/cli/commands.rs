@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
+use crate::cli::KeyManager;
 use crate::core::message_handler::MessageHandler;
 use crate::core::mixnet_client::MixnetService;
 use log::info;
@@ -122,6 +123,17 @@ impl CliApp {
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Registering user: {}", username);
+
+        // Use KeyManager to create new keys with password prompting
+        let (secret_key, public_key, passphrase) = KeyManager::create_new_keys(username)?;
+
+        // Verify keys are valid
+        KeyManager::verify_keys(&secret_key, &public_key)?;
+
+        // Set the keys in the message handler
+        handler.set_pgp_keys(secret_key, public_key, passphrase);
+
+        // Now register with the server
         let success = handler.register_user(username).await?;
 
         if success {
@@ -138,6 +150,17 @@ impl CliApp {
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Logging in user: {}", username);
+
+        // Use KeyManager to load existing keys with password prompting
+        let (secret_key, public_key, passphrase) = KeyManager::load_existing_keys(username)?;
+
+        // Verify keys are valid
+        KeyManager::verify_keys(&secret_key, &public_key)?;
+
+        // Set the keys in the message handler
+        handler.set_pgp_keys(secret_key, public_key, passphrase);
+
+        // Now login with the server
         let success = handler.login_user(username).await?;
 
         if success {
@@ -300,7 +323,7 @@ impl CliApp {
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Getting group stats from {}", server);
-        handler.get_group_stats(server).await?;
+        handler.service.get_group_stats(server).await?;
         info!("Group stats request sent");
         Ok(())
     }
