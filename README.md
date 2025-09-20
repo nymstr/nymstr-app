@@ -1,16 +1,13 @@
-# Nymstr
+# nymstr
 
 > **⚠️ Under Active Development**
-> This software is in active development. Features and APIs may change without notice.
-
-Nymstr is a secure messaging application built on the Nym mixnet, providing end-to-end encrypted communications with enhanced privacy through onion routing. It supports both direct messaging and group conversations.
+ Features and APIs may change without notice.
 
 ## Quick Start
 
 ### Prerequisites
 
 1. **Rust**: Install from [rustup.rs](https://rustup.rs/)
-2. **Nym Network**: Ensure you have access to a Nym mixnet
 
 ### Setup
 
