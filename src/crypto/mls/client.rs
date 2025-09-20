@@ -83,7 +83,7 @@ impl MlsClient {
     }
 
     /// Create an MLS client with the configured storage
-    fn create_client(&self) -> Result<Client<impl MlsConfig>> {
+    pub fn create_client(&self) -> Result<Client<impl MlsConfig>> {
         let crypto_provider = OpensslCryptoProvider::default();
 
         // Note: build() returns Client directly, no Result wrapping

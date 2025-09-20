@@ -11,6 +11,7 @@ pub mod client;
 pub mod key_packages;
 // Removed custom storage - now using official mls-rs-provider-sqlite
 pub mod types;
+pub mod persistence;
 
 #[cfg(test)]
 mod basic_test;

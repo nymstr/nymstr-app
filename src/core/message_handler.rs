@@ -1,7 +1,10 @@
 //! High-level handler for user registration, login, messaging, and queries
 #![allow(dead_code)]
-use crate::crypto::{Crypto, EncryptedMessage};
+use crate::crypto::{Crypto, EncryptedMessage, MlsClient};
+use crate::crypto::pgp::PgpKeyManager;
+use crate::crypto::mls::persistence::MlsGroupPersistence;
 use mls_rs::{Client, ExtensionList, MlsMessage, CipherSuite, CryptoProvider, CipherSuiteProvider};
+use mls_rs::crypto::{SignatureSecretKey, SignaturePublicKey};
 use mls_rs::client_builder::MlsConfig;
 use mls_rs::identity::MlsCredential;
 use mls_rs::group::ReceivedMessage;
@@ -40,6 +43,8 @@ pub struct MessageHandler {
     pub pgp_secret_key: Option<SignedSecretKey>,
     /// MLS key package manager
     pub key_package_manager: KeyPackageManager,
+    /// MLS group state persistence
+    pub mls_persistence: Option<MlsGroupPersistence>,
 }
 
 impl MessageHandler {
@@ -62,7 +67,50 @@ impl MessageHandler {
             nym_address: None,
             pgp_public_key: None,
             pgp_secret_key: None,
+            mls_persistence: None, // Will be set when user logs in
         })
+    }
+
+    /// Load or generate persistent MLS signature keys for a user
+    async fn load_or_generate_mls_keys<T: CipherSuiteProvider>(
+        &self,
+        cipher_suite_provider: &T,
+        username: &str,
+    ) -> anyhow::Result<(SignatureSecretKey, SignaturePublicKey)> {
+        let keys_dir = std::path::Path::new("storage/mls_keys");
+        std::fs::create_dir_all(keys_dir)
+            .map_err(|e| anyhow!("Failed to create MLS keys directory: {}", e))?;
+
+        let secret_key_path = keys_dir.join(format!("{}_secret.key", username));
+        let public_key_path = keys_dir.join(format!("{}_public.key", username));
+
+        // Try to load existing keys
+        if secret_key_path.exists() && public_key_path.exists() {
+            log::info!("Loading existing MLS signature keys for user: {}", username);
+            let secret_bytes = std::fs::read(&secret_key_path)
+                .map_err(|e| anyhow!("Failed to read MLS secret key: {}", e))?;
+            let public_bytes = std::fs::read(&public_key_path)
+                .map_err(|e| anyhow!("Failed to read MLS public key: {}", e))?;
+
+            let secret_key = SignatureSecretKey::new_slice(&secret_bytes);
+            let public_key = SignaturePublicKey::new_slice(&public_bytes);
+
+            Ok((secret_key, public_key))
+        } else {
+            // Generate new keys and save them
+            log::info!("Generating new MLS signature keys for user: {}", username);
+            let (secret_key, public_key) = cipher_suite_provider.signature_key_generate()
+                .map_err(|e| anyhow!("Failed to generate MLS signature keys: {:?}", e))?;
+
+            // Save the keys
+            std::fs::write(&secret_key_path, secret_key.as_bytes())
+                .map_err(|e| anyhow!("Failed to save MLS secret key: {}", e))?;
+            std::fs::write(&public_key_path, public_key.as_bytes())
+                .map_err(|e| anyhow!("Failed to save MLS public key: {}", e))?;
+
+            log::info!("Saved new MLS signature keys for user: {}", username);
+            Ok((secret_key, public_key))
+        }
     }
 
     /// Create an MLS client following the official mls-rs pattern
@@ -81,9 +129,9 @@ impl MessageHandler {
         let cipher_suite_provider = crypto_provider.cipher_suite_provider(cipher_suite)
             .ok_or_else(|| anyhow!("Cipher suite not supported"))?;
 
-        // Generate MLS signature keys
-        let (secret_key, public_key) = cipher_suite_provider.signature_key_generate()
-            .map_err(|e| anyhow!("Failed to generate MLS signature keys: {}", e))?;
+        // Load or generate persistent MLS signature keys
+        let (secret_key, public_key) = self.load_or_generate_mls_keys(&cipher_suite_provider, username)
+            .await.map_err(|e| anyhow!("Failed to get MLS signature keys: {}", e))?;
 
         // Create PGP credential for MLS (reusing the credential creation from our wrapper)
         let pgp_credential = crate::crypto::mls::client::PgpCredential::new(username.clone(), pgp_public_key)?;
@@ -173,14 +221,28 @@ impl MessageHandler {
 
     /// Login an existing user via the mixnet service, awaiting server response
     pub async fn login_user(&mut self, username: &str) -> anyhow::Result<bool> {
-        // Ensure current user is set and generate PGP keys for this session
+        // Ensure current user is set and load or generate PGP keys for this session
         self.current_user = Some(username.to_string());
-        // Generate PGP keypair for this session
-        let (secret_key, public_key) = Crypto::generate_pgp_keypair(username)?;
+
+        // Try to load existing PGP keys, or generate new ones if they don't exist
+        let (secret_key, public_key) = if let Some((existing_secret, existing_public)) = PgpKeyManager::load_keypair(username)? {
+            log::info!("Loaded existing PGP keys for user: {}", username);
+            (existing_secret, existing_public)
+        } else {
+            log::info!("Generating new PGP keys for user: {}", username);
+            let (new_secret, new_public) = Crypto::generate_pgp_keypair(username)?;
+            // Save the newly generated keys for future use
+            PgpKeyManager::save_keypair(username, &new_secret, &new_public)?;
+            log::info!("Saved new PGP keys for user: {}", username);
+            (new_secret, new_public)
+        };
+
         self.pgp_public_key = Some(public_key.clone());
         self.pgp_secret_key = Some(secret_key.clone());
         // Initialize MLS storage path for client creation
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
+        // Initialize MLS group persistence
+        self.mls_persistence = Some(MlsGroupPersistence::new(username.to_string(), self.db.clone()));
 
         // Send initial login request
         self.service.send_login_request(username).await?;
@@ -338,6 +400,11 @@ impl MessageHandler {
         self.service
             .send_mls_message(&user, recipient, &encrypted_message, &signature)
             .await?;
+
+        // Save group state to MLS internal storage after sending message
+        group.write_to_storage()?;
+        log::info!("Saved MLS group state to persistent storage after sending message");
+
         Ok(())
     }
 
@@ -780,16 +847,35 @@ impl MessageHandler {
         let mls_msg = mls_rs::MlsMessage::from_bytes(&mls_message)?;
 
         // Load the group for this conversation
+        log::info!("Attempting to load MLS group for conversation_id: {:?} (as string: '{}')",
+                   conversation_id, String::from_utf8_lossy(&conversation_id));
         let mut group = match client.load_group(&conversation_id) {
-            Ok(group) => group,
-            Err(_) => return Err(anyhow!("No MLS group found for conversation")),
+            Ok(group) => {
+                log::info!("Successfully loaded MLS group for conversation");
+                group
+            },
+            Err(e) => {
+                log::error!("Failed to load MLS group for conversation: {:?}", e);
+                return Err(anyhow!("No MLS group found for conversation: {:?}", e));
+            },
         };
 
         // Process the incoming message
-        let processed = group.process_incoming_message(mls_msg)?;
+        log::info!("About to process incoming MLS message with group.process_incoming_message()");
+        let processed = match group.process_incoming_message(mls_msg) {
+            Ok(processed) => {
+                log::info!("Successfully processed incoming MLS message");
+                processed
+            },
+            Err(e) => {
+                log::error!("Failed to process incoming MLS message: {:?}", e);
+                return Err(anyhow!("Failed to process MLS message: {:?}", e));
+            },
+        };
 
-        // Save group state after processing
+        // Save group state after processing to MLS internal storage
         group.write_to_storage()?;
+        log::info!("Saved MLS group state to persistent storage after processing message");
 
         // Extract decrypted content if it's an application message
         let decrypted = match processed {
@@ -851,6 +937,25 @@ impl MessageHandler {
     pub async fn get_group_stats(&mut self, group_server_address: &str) -> anyhow::Result<()> {
         self.service.get_group_stats(group_server_address).await?;
         Ok(())
+    }
+
+    /// Load all contacts and their message history for the current user
+    pub async fn load_chat_history(&self) -> anyhow::Result<Vec<(String, Vec<(bool, String, chrono::DateTime<chrono::Utc>)>)>> {
+        let user = self.current_user.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No user logged in"))?;
+
+        // Get all contacts for this user
+        let contacts = self.db.load_contacts(user).await?;
+
+        let mut chat_history = Vec::new();
+
+        for (contact_name, _contact_pk) in contacts {
+            // Load messages for each contact
+            let messages = self.db.load_messages(user, &contact_name).await?;
+            chat_history.push((contact_name, messages));
+        }
+
+        Ok(chat_history)
     }
 }
 

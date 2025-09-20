@@ -333,6 +333,10 @@ impl App {
                                     None => {
                                         chat.contacts.push(Contact::new(&from));
                                         chat.messages.push(Vec::new());
+                                        // Save new contact to database
+                                        if let Some(current_user) = &self.logged_in_user {
+                                            let _ = handler.db.add_contact(&current_user.username, &from, "").await;
+                                        }
                                         chat.contacts.len() - 1
                                     }
                                 };
@@ -474,6 +478,12 @@ impl App {
                                                 // clear so the chat input box starts empty
                                                 self.input_buffer.clear();
                                                 self.phase = Phase::Chat;
+                                                // Load chat history after successful login
+                                                if let Err(e) = self.load_chat_history_to_screen().await {
+                                                    if let Ok(mut logs) = LOG_BUFFER.lock() {
+                                                        logs.push(format!("Failed to load chat history: {:?}", e));
+                                                    }
+                                                }
                                             } else {
                                                 if let Ok(mut logs) = LOG_BUFFER.lock() {
                                                     logs.push("Login failed".to_string());
@@ -1223,5 +1233,58 @@ impl App {
             .alignment(Alignment::Center)
             .style(Style::default().fg(Color::Gray));
         frame.render_widget(instructions, chunks[2]);
+    }
+
+    /// Load chat history from database and populate the chat screen
+    async fn load_chat_history_to_screen(&mut self) -> io::Result<()> {
+        if let Some(handler) = &self.handler {
+            match handler.load_chat_history().await {
+                Ok(chat_history) => {
+                    if let Some(chat) = self.screen.as_chat_mut() {
+                        // Clear existing data
+                        chat.contacts.clear();
+                        chat.messages.clear();
+
+                        // Load contacts and messages from database
+                        for (contact_name, messages) in chat_history {
+                            // Add contact
+                            chat.contacts.push(Contact::new(&contact_name));
+
+                            // Convert database messages to TUI Message format
+                            let mut contact_messages = Vec::new();
+                            for (sent, content, timestamp) in messages {
+                                let sender = if sent {
+                                    // Message sent by current user - use their username
+                                    self.logged_in_user.as_ref()
+                                        .map(|u| u.username.as_str())
+                                        .unwrap_or("You")
+                                } else {
+                                    // Message received from contact
+                                    &contact_name
+                                };
+                                contact_messages.push(Message {
+                                    sender: sender.to_string(),
+                                    content,
+                                    timestamp,
+                                });
+                            }
+                            chat.messages.push(contact_messages);
+                        }
+
+                        // Update UI state if we have contacts
+                        if !chat.contacts.is_empty() {
+                            chat.highlighted_contact = 0;
+                            chat.contacts_state.select(Some(0));
+                        }
+
+                        info!("Loaded {} contacts with chat history", chat.contacts.len());
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to load chat history: {}", e);
+                }
+            }
+        }
+        Ok(())
     }
 }

@@ -3,6 +3,8 @@
 use anyhow::Result;
 use pgp::composed::{KeyType, SecretKeyParamsBuilder, SignedSecretKey, SignedPublicKey};
 use pgp::types::SecretKeyTrait;
+use pgp::Deserializable;
+use std::{fs, path::Path};
 
 /// PGP key management utilities
 pub struct PgpKeyManager;
@@ -28,5 +30,49 @@ impl PgpKeyManager {
     pub fn public_key_armored(public_key: &SignedPublicKey) -> Result<String> {
         let armored = public_key.to_armored_string(Default::default())?;
         Ok(armored)
+    }
+
+    /// Save PGP keypair to storage directory
+    pub fn save_keypair(username: &str, secret_key: &SignedSecretKey, public_key: &SignedPublicKey) -> Result<()> {
+        let user_dir = Path::new("storage").join(username).join("pgp_keys");
+        fs::create_dir_all(&user_dir)?;
+
+        // Save secret key
+        let secret_armored = secret_key.to_armored_string(Default::default())?;
+        fs::write(user_dir.join("secret.asc"), secret_armored)?;
+
+        // Save public key
+        let public_armored = public_key.to_armored_string(Default::default())?;
+        fs::write(user_dir.join("public.asc"), public_armored)?;
+
+        Ok(())
+    }
+
+    /// Load PGP keypair from storage directory
+    pub fn load_keypair(username: &str) -> Result<Option<(SignedSecretKey, SignedPublicKey)>> {
+        let user_dir = Path::new("storage").join(username).join("pgp_keys");
+        let secret_path = user_dir.join("secret.asc");
+        let public_path = user_dir.join("public.asc");
+
+        // Check if both files exist
+        if !secret_path.exists() || !public_path.exists() {
+            return Ok(None);
+        }
+
+        // Load secret key
+        let secret_armored = fs::read_to_string(&secret_path)?;
+        let (secret_key, _) = SignedSecretKey::from_string(&secret_armored)?;
+
+        // Load public key
+        let public_armored = fs::read_to_string(&public_path)?;
+        let (public_key, _) = SignedPublicKey::from_string(&public_armored)?;
+
+        Ok(Some((secret_key, public_key)))
+    }
+
+    /// Check if PGP keys exist for user
+    pub fn keys_exist(username: &str) -> bool {
+        let user_dir = Path::new("storage").join(username).join("pgp_keys");
+        user_dir.join("secret.asc").exists() && user_dir.join("public.asc").exists()
     }
 }
