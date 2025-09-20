@@ -2,8 +2,7 @@
 #![allow(dead_code)]
 use crate::crypto::{Crypto, EncryptedMessage};
 use crate::crypto::pgp::PgpKeyManager;
-use crate::crypto::mls::persistence::MlsGroupPersistence;
-use mls_rs::{Client, ExtensionList, MlsMessage, CipherSuite, CryptoProvider, CipherSuiteProvider};
+use mls_rs::{Client, ExtensionList, CipherSuite, CryptoProvider, CipherSuiteProvider};
 use mls_rs::crypto::{SignatureSecretKey, SignaturePublicKey};
 use mls_rs::client_builder::MlsConfig;
 use mls_rs::identity::MlsCredential;
@@ -43,8 +42,6 @@ pub struct MessageHandler {
     pub pgp_secret_key: Option<SignedSecretKey>,
     /// MLS key package manager
     pub key_package_manager: KeyPackageManager,
-    /// MLS group state persistence
-    pub mls_persistence: Option<MlsGroupPersistence>,
 }
 
 impl MessageHandler {
@@ -67,7 +64,6 @@ impl MessageHandler {
             nym_address: None,
             pgp_public_key: None,
             pgp_secret_key: None,
-            mls_persistence: None, // Will be set when user logs in
         })
     }
 
@@ -119,7 +115,7 @@ impl MessageHandler {
             .ok_or_else(|| anyhow!("No user logged in"))?;
         let storage_path = self.mls_storage_path.as_ref()
             .ok_or_else(|| anyhow!("MLS storage not initialized"))?;
-        let pgp_secret_key = self.pgp_secret_key.as_ref()
+        let _pgp_secret_key = self.pgp_secret_key.as_ref()
             .ok_or_else(|| anyhow!("PGP key not available"))?;
         let pgp_public_key = self.pgp_public_key.as_ref()
             .ok_or_else(|| anyhow!("PGP public key not available"))?;
@@ -241,8 +237,6 @@ impl MessageHandler {
         self.pgp_secret_key = Some(secret_key.clone());
         // Initialize MLS storage path for client creation
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
-        // Initialize MLS group persistence
-        self.mls_persistence = Some(MlsGroupPersistence::new(username.to_string(), self.db.clone()));
 
         // Send initial login request
         self.service.send_login_request(username).await?;
@@ -899,7 +893,7 @@ impl MessageHandler {
     }
 
     /// Authenticate with group server (register + connect)
-    pub async fn authenticate_group(&mut self, username: &str, group_server_address: &str) -> anyhow::Result<bool> {
+    pub async fn authenticate_group(&mut self, _username: &str, _group_server_address: &str) -> anyhow::Result<bool> {
         // Get user's PGP keys
         let public_key = match &self.pgp_public_key {
             Some(pk) => pk,
@@ -909,7 +903,7 @@ impl MessageHandler {
             }
         };
 
-        let secret_key = match &self.pgp_secret_key {
+        let _secret_key = match &self.pgp_secret_key {
             Some(sk) => sk,
             None => {
                 log::error!("No PGP secret key available for group authentication");
@@ -917,7 +911,7 @@ impl MessageHandler {
             }
         };
 
-        let public_key_armored = Crypto::pgp_public_key_armored(public_key)?;
+        let _public_key_armored = Crypto::pgp_public_key_armored(public_key)?;
 
         // TODO: Group functionality needs to be redesigned for unified format
         log::warn!("Group functionality not yet implemented in unified format");

@@ -11,10 +11,8 @@ pub mod client;
 pub mod key_packages;
 // Removed custom storage - now using official mls-rs-provider-sqlite
 pub mod types;
-pub mod persistence;
 
 
-pub use client::{PgpCredential, PgpIdentityProvider};
 pub use key_packages::KeyPackageManager;
 // Storage now handled by official mls-rs-provider-sqlite
 pub use types::{EncryptedMessage, MlsMessageType};

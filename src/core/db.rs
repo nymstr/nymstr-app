@@ -289,68 +289,6 @@ impl Db {
         Ok(msgs)
     }
 
-    /// Save MLS group state for a conversation.
-    pub async fn save_mls_group_state(&self, me: &str, conversation_id: &str, group_state: &[u8]) -> Result<()> {
-        let table = format!("mls_groups_{}", me);
-        sqlx::query(&format!(
-            r#"
-            INSERT OR REPLACE INTO {table} (conversation_id, group_state, updated_at)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
-            "#,
-            table = table
-        ))
-        .bind(conversation_id)
-        .bind(group_state)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// Load MLS group state for a conversation.
-    pub async fn load_mls_group_state(&self, me: &str, conversation_id: &str) -> Result<Option<Vec<u8>>> {
-        let table = format!("mls_groups_{}", me);
-        if let Some(row) = sqlx::query(&format!(
-            r#"SELECT group_state FROM {table} WHERE conversation_id = ?"#,
-            table = table
-        ))
-        .bind(conversation_id)
-        .fetch_optional(&self.pool)
-        .await?
-        {
-            let state: Vec<u8> = row.try_get("group_state")?;
-            Ok(Some(state))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Delete MLS group state for a conversation.
-    pub async fn delete_mls_group_state(&self, me: &str, conversation_id: &str) -> Result<()> {
-        let table = format!("mls_groups_{}", me);
-        sqlx::query(&format!(
-            "DELETE FROM {table} WHERE conversation_id = ?",
-            table = table
-        ))
-        .bind(conversation_id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    /// List all MLS conversations for a user.
-    pub async fn list_mls_conversations(&self, me: &str) -> Result<Vec<String>> {
-        let table = format!("mls_groups_{}", me);
-        let rows = sqlx::query(&format!(
-            r#"SELECT conversation_id FROM {table} ORDER BY updated_at DESC"#,
-            table = table
-        ))
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| r.try_get("conversation_id").unwrap())
-            .collect())
-    }
 }
 
 #[cfg(test)]
