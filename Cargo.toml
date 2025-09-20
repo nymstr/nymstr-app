@@ -31,7 +31,13 @@ clap = { version = "4.0", features = ["derive"] }
  fastrand = "1.9"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "chrono"] }
 rusqlite = "0.32"
-pgp = "0.13"
+pgp = "0.16"
+# Security dependencies
+argon2 = "0.5"
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.5"
+rand = "0.8"
+libc = "0.2"
 # MLS dependencies
 mls-rs = { version = "0.51.0", features = ["sqlite"] }
 mls-rs-core = "0.24.0"
