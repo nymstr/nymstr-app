@@ -9,25 +9,33 @@ use log::{info, error};
 use pgp::composed::{SignedSecretKey, SignedPublicKey};
 use std::sync::Arc;
 
+/// Type alias for Arc-wrapped PGP secret key to reduce expensive cloning
+pub type ArcSecretKey = Arc<SignedSecretKey>;
+/// Type alias for Arc-wrapped PGP public key to reduce expensive cloning
+pub type ArcPublicKey = Arc<SignedPublicKey>;
+/// Type alias for Arc-wrapped secure passphrase to reduce expensive cloning
+pub type ArcPassphrase = Arc<SecurePassphrase>;
+
 /// Handles authentication challenge/response protocols
+#[allow(dead_code)] // Fields used in future authentication flows
 pub struct AuthenticationHandler {
     /// Database for persistence
     pub db: Arc<Db>,
     /// Mixnet service for sending responses
     pub service: Arc<MixnetService>,
-    /// PGP keys for signing challenges
-    pub pgp_secret_key: Option<SignedSecretKey>,
-    pub pgp_public_key: Option<SignedPublicKey>,
-    pub pgp_passphrase: Option<SecurePassphrase>,
+    /// PGP keys for signing challenges (Arc-wrapped to avoid expensive cloning)
+    pub pgp_secret_key: Option<ArcSecretKey>,
+    pub pgp_public_key: Option<ArcPublicKey>,
+    pub pgp_passphrase: Option<ArcPassphrase>,
 }
 
 impl AuthenticationHandler {
     pub fn new(
         db: Arc<Db>,
         service: Arc<MixnetService>,
-        pgp_secret_key: Option<SignedSecretKey>,
-        pgp_public_key: Option<SignedPublicKey>,
-        pgp_passphrase: Option<SecurePassphrase>,
+        pgp_secret_key: Option<ArcSecretKey>,
+        pgp_public_key: Option<ArcPublicKey>,
+        pgp_passphrase: Option<ArcPassphrase>,
     ) -> Self {
         Self {
             db,
@@ -101,6 +109,7 @@ impl AuthenticationHandler {
     }
 
     /// Handle query response from server
+    #[allow(dead_code)] // Part of public API for query handling
     pub async fn process_query_response(&self, username: &str, public_key: &str) -> Result<(String, String)> {
         info!("Received query response for user: {}", username);
 
@@ -118,11 +127,12 @@ impl AuthenticationHandler {
     }
 
     /// Update handler state when PGP keys change
+    #[allow(dead_code)] // Part of public API for key management
     pub fn update_pgp_keys(
         &mut self,
-        secret_key: Option<SignedSecretKey>,
-        public_key: Option<SignedPublicKey>,
-        passphrase: Option<SecurePassphrase>,
+        secret_key: Option<ArcSecretKey>,
+        public_key: Option<ArcPublicKey>,
+        passphrase: Option<ArcPassphrase>,
     ) {
         self.pgp_secret_key = secret_key;
         self.pgp_public_key = public_key;

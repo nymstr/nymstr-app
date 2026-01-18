@@ -6,6 +6,7 @@ use crate::core::mixnet_client::Incoming;
 
 /// Different types of messages that can be routed
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)] // Some variants used for future routing
 pub enum MessageRoute {
     /// Authentication-related messages (challenge, loginResponse, etc.)
     Authentication,
@@ -17,6 +18,10 @@ pub enum MessageRoute {
     Handshake,
     /// Query/lookup operations
     Query,
+    /// Group server operations (fetchGroupResponse, sendGroupResponse, etc.)
+    Group,
+    /// MLS Welcome flow messages (mlsWelcome, groupInvite, groupJoinRequest, etc.)
+    WelcomeFlow,
     /// Unknown or unsupported message types
     Unknown,
 }
@@ -33,9 +38,15 @@ impl MessageRouter {
                 MessageRoute::Authentication
             }
 
-            // MLS protocol messages
+            // MLS protocol messages (key package exchange)
             "keyPackageRequest" | "groupWelcome" => {
                 MessageRoute::MlsProtocol
+            }
+
+            // MLS Welcome flow messages (group invitation and joining)
+            "mlsWelcome" | "groupInvite" | "groupJoinRequest" | "welcomeAck"
+            | "keyPackageForGroup" | "keyPackageForGroupResponse" => {
+                MessageRoute::WelcomeFlow
             }
 
             // MLS chat messages (all messages use MLS now)
@@ -53,6 +64,11 @@ impl MessageRouter {
                 MessageRoute::Query
             }
 
+            // Group server responses
+            "fetchGroupResponse" | "sendGroupResponse" | "registerResponse" | "approveGroupResponse" => {
+                MessageRoute::Group
+            }
+
             // Unknown message type
             _ => MessageRoute::Unknown,
         }
@@ -66,6 +82,8 @@ impl MessageRouter {
             MessageRoute::MlsProtocol => true,     // Handle immediately
             MessageRoute::Chat => true,            // Handle immediately
             MessageRoute::Handshake => true,       // Handle immediately
+            MessageRoute::Group => true,           // Handle group responses immediately
+            MessageRoute::WelcomeFlow => true,     // Handle Welcome flow immediately
             MessageRoute::Unknown => false,        // Ignore
         }
     }
@@ -78,6 +96,8 @@ impl MessageRouter {
             MessageRoute::Chat => "Chat message",
             MessageRoute::Handshake => "Handshake message",
             MessageRoute::Query => "Query response",
+            MessageRoute::Group => "Group server message",
+            MessageRoute::WelcomeFlow => "MLS Welcome flow message",
             MessageRoute::Unknown => "Unknown message type",
         }
     }
@@ -92,9 +112,13 @@ mod tests {
 
     fn create_test_incoming(action: &str) -> Incoming {
         let envelope = MixnetMessage {
+            message_type: "message".to_string(),
             action: action.to_string(),
             sender: "test_sender".to_string(),
+            recipient: "test_recipient".to_string(),
             payload: json!({}),
+            signature: "test_signature".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
         };
 
         Incoming {
@@ -125,11 +149,13 @@ mod tests {
 
     #[test]
     fn test_chat_routing() {
+        // Note: "send" and "incomingMessage" now route to MlsProtocol since all messages use MLS
         let messages = ["send", "incomingMessage"];
 
         for action in messages {
             let incoming = create_test_incoming(action);
-            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::Chat);
+            // All chat messages now go through MLS
+            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::MlsProtocol);
         }
     }
 
@@ -152,12 +178,30 @@ mod tests {
     }
 
     #[test]
+    fn test_welcome_flow_routing() {
+        let messages = [
+            "mlsWelcome",
+            "groupInvite",
+            "groupJoinRequest",
+            "welcomeAck",
+            "keyPackageForGroup",
+            "keyPackageForGroupResponse",
+        ];
+
+        for action in messages {
+            let incoming = create_test_incoming(action);
+            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::WelcomeFlow);
+        }
+    }
+
+    #[test]
     fn test_should_process_immediately() {
         assert!(!MessageRouter::should_process_immediately(&MessageRoute::Authentication));
         assert!(!MessageRouter::should_process_immediately(&MessageRoute::Query));
         assert!(MessageRouter::should_process_immediately(&MessageRoute::MlsProtocol));
         assert!(MessageRouter::should_process_immediately(&MessageRoute::Chat));
         assert!(MessageRouter::should_process_immediately(&MessageRoute::Handshake));
+        assert!(MessageRouter::should_process_immediately(&MessageRoute::WelcomeFlow));
         assert!(!MessageRouter::should_process_immediately(&MessageRoute::Unknown));
     }
 }

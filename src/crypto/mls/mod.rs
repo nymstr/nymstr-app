@@ -5,6 +5,7 @@
 //! - Group conversation management
 //! - Key package exchange protocols
 //! - Secure group establishment
+//! - Epoch-aware message buffering for mixnet delivery
 
 pub mod client;
 // Groups now managed by MlsClient directly
@@ -13,6 +14,7 @@ pub mod key_packages;
 pub mod types;
 pub mod persistence;
 pub mod conversation_manager;
+pub mod epoch_buffer;
 
 #[cfg(test)]
 mod basic_test;
@@ -23,9 +25,18 @@ pub mod test_storage;
 #[cfg(test)]
 pub mod test_client;
 
+#[allow(unused_imports)] // Part of public API
 pub use client::MlsClient;
 // GroupManager removed - groups handled by MlsClient
-pub use key_packages::KeyPackageManager;
+#[allow(unused_imports)] // Part of public API
+pub use key_packages::{KeyPackageManager, KeyPackageValidationResult};
 // Storage now handled by official mls-rs-provider-sqlite
-pub use types::{EncryptedMessage, MlsMessageType};
+#[allow(unused_imports)] // Part of public API
+pub use types::{
+    EncryptedMessage, MlsMessageType, MlsCredential, CredentialValidationResult,
+    // Phase 3: Welcome Flow types
+    MlsWelcome, MlsGroupInfoPublic, StoredWelcome, MlsAddMemberResult,
+};
 pub use conversation_manager::MlsConversationManager;
+#[allow(unused_imports)] // Part of public API
+pub use epoch_buffer::{EpochAwareBuffer, BufferedMessage, BufferStats};

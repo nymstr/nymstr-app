@@ -3,7 +3,9 @@
 //! This module provides basic group state persistence functionality
 //! that works with the existing database structure.
 
-use anyhow::{Result, anyhow};
+#![allow(dead_code)] // Methods are part of the public API for MLS persistence
+
+use anyhow::Result;
 use std::sync::Arc;
 use std::collections::HashMap;
 use base64::Engine;

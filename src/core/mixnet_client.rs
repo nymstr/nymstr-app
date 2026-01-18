@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 use crate::core::{db::Db, messages::MixnetMessage};
 use crate::crypto::Crypto;
+use crate::crypto::mls::types::MlsWelcome;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use log::info;
@@ -248,9 +249,85 @@ impl MixnetService {
     }
 
     /// Send a group message to group server
-    pub async fn send_group_message(&self, _ciphertext: &str, _group_server_address: &str) -> Result<()> {
-        // TODO: Group functionality needs to be redesigned for unified format
-        Err(anyhow::anyhow!("Group messaging not yet implemented in unified format"))
+    pub async fn send_group_message(
+        &self,
+        sender: &str,
+        ciphertext: &str,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::send_group(sender, ciphertext, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending group message to {}", group_server_address);
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group message sent successfully");
+        Ok(())
+    }
+
+    /// Register with a group server using timestamp-based authentication
+    /// Signature is over: "register:{username}:{server_address}:{timestamp}"
+    pub async fn register_with_group_server(
+        &self,
+        username: &str,
+        public_key: &str,
+        signature: &str,
+        timestamp: i64,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::register_with_group_server(username, public_key, signature, timestamp, group_server_address);
+        let payload = env.to_json()?;
+        log::info!("Registering with group server {}", group_server_address);
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group registration request sent");
+        Ok(())
+    }
+
+    /// Approve a pending group member (admin only)
+    pub async fn approve_group_member(
+        &self,
+        admin: &str,
+        username_to_approve: &str,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::approve_group_member(admin, username_to_approve, signature);
+        let payload = env.to_json()?;
+        log::info!("Approving group member {} on server {}", username_to_approve, group_server_address);
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group approval request sent");
+        Ok(())
+    }
+
+    /// Fetch group messages from group server since last_seen_id
+    pub async fn send_group_fetch_request(
+        &self,
+        sender: &str,
+        last_seen_id: i64,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::fetch_group(sender, last_seen_id, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending fetchGroup request - lastSeenId: {}", last_seen_id);
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("fetchGroup request sent successfully");
+        Ok(())
     }
 
     /// Get fanout queue statistics from group server
@@ -387,6 +464,364 @@ impl MixnetService {
             .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
             .await?;
         log::info!("Group join response sent successfully");
+        Ok(())
+    }
+
+    // ========== Phase 3: Welcome Flow Methods ==========
+
+    /// Send an MLS Welcome message to invite a user to a group
+    ///
+    /// This method sends a Welcome message that allows the recipient to join
+    /// an MLS group. The Welcome contains all cryptographic material needed
+    /// for the recipient to decrypt group messages.
+    ///
+    /// # Arguments
+    /// * `sender` - The username of the group admin sending the welcome
+    /// * `recipient` - The username of the user being invited
+    /// * `welcome` - The MlsWelcome structure containing the welcome data
+    /// * `signature` - PGP signature of the welcome for authenticity
+    ///
+    /// # Returns
+    /// Ok(()) on successful transmission
+    pub async fn send_mls_welcome(
+        &self,
+        sender: &str,
+        recipient: &str,
+        welcome: &MlsWelcome,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::mls_welcome(sender, recipient, welcome, signature);
+        let payload = env.to_json()?;
+        log::info!(
+            "Sending MLS welcome for group {} to {} via server",
+            welcome.group_id, recipient
+        );
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient_addr: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient_addr, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!(
+            "MLS welcome for group {} sent to {} successfully",
+            welcome.group_id, recipient
+        );
+        Ok(())
+    }
+
+    /// Send a group join request with our KeyPackage
+    ///
+    /// This is sent when a user wants to join a group and provides their
+    /// KeyPackage for the group admin to add them.
+    ///
+    /// # Arguments
+    /// * `sender` - The username requesting to join
+    /// * `group_id` - The group identifier
+    /// * `key_package` - Base64-encoded KeyPackage
+    /// * `signature` - PGP signature of the request
+    pub async fn send_group_join_request(
+        &self,
+        sender: &str,
+        group_id: &str,
+        key_package: &str,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::group_join_request(sender, group_id, key_package, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending group join request for group {} via server", group_id);
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group join request sent successfully");
+        Ok(())
+    }
+
+    /// Send a Welcome acknowledgment after successfully joining a group
+    ///
+    /// # Arguments
+    /// * `sender` - The user who joined
+    /// * `recipient` - The group admin who sent the welcome
+    /// * `group_id` - The group that was joined
+    /// * `success` - Whether joining was successful
+    /// * `signature` - PGP signature of the acknowledgment
+    pub async fn send_welcome_ack(
+        &self,
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        success: bool,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::welcome_ack(sender, recipient, group_id, success, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending welcome ack for group {} to {} via server", group_id, recipient);
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient_addr: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient_addr, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Welcome ack sent successfully");
+        Ok(())
+    }
+
+    /// Send a group invite notification to a user
+    ///
+    /// # Arguments
+    /// * `sender` - The group admin sending the invite
+    /// * `recipient` - The user being invited
+    /// * `group_id` - The group identifier
+    /// * `group_name` - Optional human-readable group name
+    /// * `signature` - PGP signature of the invite
+    pub async fn send_group_invite(
+        &self,
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        group_name: Option<&str>,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::group_invite(sender, recipient, group_id, group_name, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending group invite for {} to {} via server", group_id, recipient);
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient_addr: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient_addr, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group invite sent successfully");
+        Ok(())
+    }
+
+    /// Request a KeyPackage from a user for adding them to a group
+    ///
+    /// # Arguments
+    /// * `sender` - The group admin requesting the KeyPackage
+    /// * `recipient` - The user to request from
+    /// * `group_id` - The group they'll be added to
+    /// * `signature` - PGP signature of the request
+    pub async fn send_key_package_for_group_request(
+        &self,
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::key_package_for_group(sender, recipient, group_id, signature);
+        let payload = env.to_json()?;
+        log::info!("Requesting KeyPackage from {} for group {} via server", recipient, group_id);
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient_addr: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient_addr, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("KeyPackage request sent successfully");
+        Ok(())
+    }
+
+    /// Send KeyPackage in response to a group join request
+    ///
+    /// # Arguments
+    /// * `sender` - The user providing their KeyPackage
+    /// * `recipient` - The group admin who requested it
+    /// * `group_id` - The group to join
+    /// * `key_package` - Base64-encoded KeyPackage
+    /// * `signature` - PGP signature of the response
+    pub async fn send_key_package_for_group_response(
+        &self,
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        key_package: &str,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::key_package_for_group_response(sender, recipient, group_id, key_package, signature);
+        let payload = env.to_json()?;
+        log::info!("Sending KeyPackage response to {} for group {} via server", recipient, group_id);
+        let raw_bytes = payload.into_bytes();
+        let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
+        let recipient_addr: Recipient = server_addr.parse()?;
+        self.sender
+            .send_message(recipient_addr, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("KeyPackage response sent successfully");
+        Ok(())
+    }
+
+    // ========== MLS Delivery Service Methods ==========
+
+    /// Register with a group server, optionally including an MLS KeyPackage
+    ///
+    /// # Arguments
+    /// * `username` - The user registering
+    /// * `public_key` - The user's PGP public key (armored)
+    /// * `signature` - PGP signature over "register:{username}:{server_address}:{timestamp}"
+    /// * `timestamp` - Unix timestamp for replay protection
+    /// * `group_server_address` - The group server's mixnet address
+    /// * `key_package` - Optional base64-encoded MLS KeyPackage
+    pub async fn register_with_group_server_and_key_package(
+        &self,
+        username: &str,
+        public_key: &str,
+        signature: &str,
+        timestamp: i64,
+        group_server_address: &str,
+        key_package: Option<&str>,
+    ) -> Result<()> {
+        let env = MixnetMessage::register_with_group_server_and_key_package(
+            username,
+            public_key,
+            signature,
+            timestamp,
+            group_server_address,
+            key_package,
+        );
+        let payload = env.to_json()?;
+        log::info!(
+            "Registering with group server {} (with KeyPackage: {})",
+            group_server_address,
+            key_package.is_some()
+        );
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Group registration request sent");
+        Ok(())
+    }
+
+    /// Store a Welcome message on the group server for a user to fetch later
+    ///
+    /// # Arguments
+    /// * `sender` - The admin/sender storing the welcome
+    /// * `group_id` - The MLS group ID
+    /// * `target_username` - The user who should receive the Welcome
+    /// * `welcome` - Base64-encoded Welcome message
+    /// * `signature` - PGP signature over "{group_id}:{target_username}"
+    /// * `group_server_address` - The group server's mixnet address
+    pub async fn store_welcome_on_server(
+        &self,
+        sender: &str,
+        group_id: &str,
+        target_username: &str,
+        welcome: &str,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::store_welcome(sender, group_id, target_username, welcome, signature);
+        let payload = env.to_json()?;
+        log::info!(
+            "Storing Welcome for {} in group {} on server {}",
+            target_username, group_id, group_server_address
+        );
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Store Welcome request sent");
+        Ok(())
+    }
+
+    /// Buffer a commit message on the group server for epoch synchronization
+    ///
+    /// This allows existing group members who missed the commit (e.g., due to being
+    /// offline) to catch up on missed epoch transitions.
+    ///
+    /// # Arguments
+    /// * `sender` - The user who created the commit (admin)
+    /// * `group_id` - The MLS group ID (base64 encoded)
+    /// * `epoch` - The epoch after applying this commit
+    /// * `commit` - Base64-encoded commit message
+    /// * `signature` - PGP signature over "{group_id}:{epoch}"
+    /// * `group_server_address` - The group server's mixnet address
+    pub async fn buffer_commit_on_server(
+        &self,
+        sender: &str,
+        group_id: &str,
+        epoch: i64,
+        commit: &str,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::buffer_commit(sender, group_id, epoch, commit, signature);
+        let payload = env.to_json()?;
+        log::info!(
+            "Buffering commit for group {} at epoch {} on server {}",
+            group_id, epoch, group_server_address
+        );
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Buffer commit request sent");
+        Ok(())
+    }
+
+    /// Fetch pending Welcome messages from the group server
+    ///
+    /// # Arguments
+    /// * `username` - The user fetching their Welcomes
+    /// * `group_id` - Optional group ID to filter by
+    /// * `signature` - PGP signature over "fetchWelcome:{username}"
+    /// * `group_server_address` - The group server's mixnet address
+    pub async fn fetch_welcome_from_server(
+        &self,
+        username: &str,
+        group_id: Option<&str>,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::fetch_welcome(username, group_id, signature);
+        let payload = env.to_json()?;
+        log::info!(
+            "Fetching Welcomes for {} from server {} (group filter: {:?})",
+            username, group_server_address, group_id
+        );
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Fetch Welcome request sent");
+        Ok(())
+    }
+
+    /// Request epoch sync from the group server
+    ///
+    /// # Arguments
+    /// * `username` - The user requesting sync
+    /// * `group_id` - The MLS group ID
+    /// * `since_epoch` - The epoch to sync from (exclusive)
+    /// * `signature` - PGP signature over "{group_id}:{since_epoch}"
+    /// * `group_server_address` - The group server's mixnet address
+    pub async fn sync_epoch_from_server(
+        &self,
+        username: &str,
+        group_id: &str,
+        since_epoch: i64,
+        signature: &str,
+        group_server_address: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::sync_epoch(username, group_id, since_epoch, signature);
+        let payload = env.to_json()?;
+        log::info!(
+            "Requesting epoch sync for group {} since epoch {} from server {}",
+            group_id, since_epoch, group_server_address
+        );
+        let raw_bytes = payload.into_bytes();
+        let recipient: Recipient = group_server_address.parse()?;
+        self.sender
+            .send_message(recipient, raw_bytes, IncludedSurbs::Amount(10))
+            .await?;
+        log::info!("Sync epoch request sent");
         Ok(())
     }
 

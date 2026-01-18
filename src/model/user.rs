@@ -8,6 +8,7 @@ pub struct User {
     pub online: bool,
 }
 
+#[allow(dead_code)] // Part of public API for user model
 impl User {
     pub fn new(username: &str) -> Self {
         Self {

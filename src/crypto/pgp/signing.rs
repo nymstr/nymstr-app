@@ -13,6 +13,7 @@ pub struct PgpSigner;
 
 /// Verified signature result
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Fields used in signature verification results
 pub struct VerifiedSignature {
     pub signer_user_id: String,
     pub is_valid: bool,
@@ -70,6 +71,7 @@ impl PgpSigner {
     }
 
     /// Create cleartext signature (message + signature combined)
+    #[allow(dead_code)] // Part of public API for cleartext signing
     pub fn sign_cleartext(
         secret_key: &SignedSecretKey,
         message: &str,

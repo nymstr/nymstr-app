@@ -1,5 +1,7 @@
 //! Basic cryptographic utilities
 
+#![allow(dead_code)] // Methods are part of the public API for cryptographic utilities
+
 use anyhow::Result;
 use pgp::composed::{SignedSecretKey, SignedPublicKey};
 use crate::crypto::pgp::SecurePassphrase;

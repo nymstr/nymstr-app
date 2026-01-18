@@ -1,3 +1,4 @@
+use crate::core::KeyManager;
 use crate::core::message_handler::MessageHandler;
 use crate::event::handle_key_event;
 use crate::log_buffer::LOG_BUFFER;
@@ -6,7 +7,7 @@ use crate::model::message::Message;
 use crate::model::user::User;
 use crate::screen::ScreenState;
 use crossterm::event::{self, Event as CEvent, KeyCode};
-use log::info;
+use log::{info, error};
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashMap;
@@ -141,12 +142,14 @@ impl App {
         let font_dir = "/usr/share/figlet";
         // Build lowercase → filename map for .flf files
         let mut map: HashMap<String, String> = HashMap::new();
-        for entry in fs::read_dir(font_dir)? {
-            let entry = entry?;
-            let f = entry.file_name().into_string().unwrap_or_default();
-            if f.to_lowercase().ends_with(".flf") {
-                let name = f[..f.len() - 4].to_lowercase();
-                map.insert(name, f);
+        // Gracefully handle missing figlet directory
+        if let Ok(entries) = fs::read_dir(font_dir) {
+            for entry in entries.flatten() {
+                let f = entry.file_name().into_string().unwrap_or_default();
+                if f.to_lowercase().ends_with(".flf") {
+                    let name = f[..f.len() - 4].to_lowercase();
+                    map.insert(name, f);
+                }
             }
         }
         // Select one random font from the list
@@ -161,10 +164,10 @@ impl App {
                 .output()
             {
                 Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
-                _ => format!("★ missing font: {} ★", font),
+                _ => Self::fallback_splash(),
             }
         } else {
-            format!("★ missing font: {} ★", font)
+            Self::fallback_splash()
         };
         // Store only the selected splash page
         self.splash_pages.clear();
@@ -174,6 +177,18 @@ impl App {
         self.splash_step = 0;
         self.splash_rising = true;
         Ok(())
+    }
+
+    fn fallback_splash() -> String {
+        r#"
+                                    _
+  _ __  _   _ _ __ ___  ___| |_ _ __
+ | '_ \| | | | '_ ` _ \/ __| __| '__|
+ | | | | |_| | | | | | \__ \ |_| |
+ |_| |_|\__, |_| |_| |_|___/\__|_|
+        |___/
+"#
+        .to_string()
     }
 
     pub async fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
@@ -454,6 +469,21 @@ impl App {
                                         logs.clear();
                                     }
                                     info!("Logging in user: {}", user);
+
+                                    // Load PGP keys (uses NYMSTR_PGP_PASSPHRASE env var)
+                                    let keys_result = KeyManager::load_or_create_keys(&user);
+                                    if let Err(e) = &keys_result {
+                                        error!("Failed to load PGP keys: {}", e);
+                                        if let Ok(mut logs) = LOG_BUFFER.lock() {
+                                            logs.push(format!("Key error: {}. Set NYMSTR_PGP_PASSPHRASE env var.", e));
+                                        }
+                                        self.handler = Some(handler);
+                                        self.phase = Phase::Login;
+                                        continue;
+                                    }
+                                    let (secret_key, public_key, passphrase) = keys_result.unwrap();
+                                    handler.set_pgp_keys(secret_key, public_key, passphrase);
+
                                     let login_handle = tokio::spawn(async move {
                                         let success =
                                             handler.login_user(&user_task).await.unwrap_or(false);
@@ -835,7 +865,8 @@ impl App {
         let block = Block::default().borders(Borders::ALL).title("Mixnet Logs");
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let logs = LOG_BUFFER.lock().unwrap();
+        let logs = LOG_BUFFER.lock()
+            .expect("LOG_BUFFER lock poisoned in draw_log_pane");
         let lines: Vec<Line> = logs.iter().map(|l| Line::from(l.as_str())).collect();
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
         frame.render_widget(paragraph, inner);
@@ -1067,7 +1098,8 @@ impl App {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // collect last N log lines based on inner area height and scroll offset
-        let logs = buffer.lock().unwrap();
+        let logs = buffer.lock()
+            .expect("log buffer lock poisoned in draw_log_panel");
         let total = logs.len();
         let height = inner.height as usize;
         // scroll offset must not exceed available logs

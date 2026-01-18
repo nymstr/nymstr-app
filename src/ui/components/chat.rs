@@ -97,7 +97,7 @@ pub fn render_chat(
     frame.render_widget(input, input_area);
 }
 
-fn message_to_line(msg: &Message) -> Line {
+fn message_to_line(msg: &Message) -> Line<'_> {
     // try to parse JSON payload and extract the inner text
     let text = serde_json::from_str::<Value>(&msg.content)
         .and_then(|v| {

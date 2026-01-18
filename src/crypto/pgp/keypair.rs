@@ -7,11 +7,16 @@ use pgp::composed::{
 use pgp::crypto::ecc_curve::ECCCurve;
 use pgp::types::Password;
 use pgp::composed::Deserializable;
-use std::{fs, path::Path, os::unix::fs::PermissionsExt};
+use std::{fs, path::Path};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use zeroize::ZeroizeOnDrop;
 use subtle::ConstantTimeEq;
-use sha2::{Sha256, Digest};
+use sha2::Sha256;
+use hmac::{Hmac, Mac};
 use rand::thread_rng;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// Secure passphrase for PGP operations
 #[derive(Clone, ZeroizeOnDrop)]
@@ -24,6 +29,7 @@ impl SecurePassphrase {
         Self { passphrase }
     }
 
+    #[allow(dead_code)] // Part of public API for user interaction
     pub fn from_user_input() -> Result<Self> {
         Self::from_user_input_with_prompt("Enter passphrase for PGP key")
     }
@@ -46,7 +52,7 @@ impl SecurePassphrase {
 
     #[cfg(unix)]
     fn read_password_secure() -> Result<String> {
-        use std::io::{self, Write};
+        use std::io;
         use std::os::unix::io::AsRawFd;
 
         // Disable echo on terminal
@@ -56,7 +62,7 @@ impl SecurePassphrase {
         unsafe {
             if libc::tcgetattr(stdin_fd, &mut termios) != 0 {
                 // Fallback to visible input if we can't disable echo
-                eprintln!("Warning: Could not disable password echo");
+                log::warn!("Could not disable password echo");
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;
                 return Ok(input.trim().to_string());
@@ -67,7 +73,7 @@ impl SecurePassphrase {
 
             if libc::tcsetattr(stdin_fd, libc::TCSANOW, &termios) != 0 {
                 // Fallback to visible input
-                eprintln!("Warning: Could not disable password echo");
+                log::warn!("Could not disable password echo");
                 let mut input = String::new();
                 io::stdin().read_line(&mut input)?;
                 return Ok(input.trim().to_string());
@@ -81,7 +87,7 @@ impl SecurePassphrase {
             termios.c_lflag = original_flags;
             libc::tcsetattr(stdin_fd, libc::TCSANOW, &termios);
 
-            println!(); // New line after hidden input
+            log::debug!("Password input completed"); // New line after hidden input
 
             match result {
                 Ok(_) => Ok(input.trim().to_string()),
@@ -93,7 +99,7 @@ impl SecurePassphrase {
     #[cfg(not(unix))]
     fn read_password_secure() -> Result<String> {
         use std::io::{self, Write};
-        eprintln!("Warning: Secure password input not available on this platform");
+        log::warn!("Secure password input not available on this platform");
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         Ok(input.trim().to_string())
@@ -172,6 +178,7 @@ impl PgpKeyManager {
     }
 
     /// Generate RSA keypair with stronger 3072-bit keys (fallback option)
+    #[allow(dead_code)] // Part of public API as fallback key generation
     pub fn generate_keypair_rsa_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
         log::info!("Generating RSA-3072 PGP keypair for user: {}", user_id);
 
@@ -276,14 +283,49 @@ impl PgpKeyManager {
         Ok(())
     }
 
-    /// Compute HMAC for file integrity verification
+    /// Compute HMAC-SHA256 for file integrity verification
+    /// Uses proper HMAC construction to prevent length extension attacks
     fn compute_file_hmac(content: &str, passphrase: &SecurePassphrase) -> Result<String> {
+        let mut mac = HmacSha256::new_from_slice(passphrase.as_str().as_bytes())
+            .map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
+        mac.update(content.as_bytes());
+        Ok(hex::encode(mac.finalize().into_bytes()))
+    }
+
+    /// Compute legacy HMAC (SHA256 concatenation) for migration
+    fn compute_legacy_hmac(content: &str, passphrase: &SecurePassphrase) -> Result<String> {
+        use sha2::Digest;
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         hasher.update(passphrase.as_str().as_bytes());
         let hash = hasher.finalize();
-
         Ok(hex::encode(hash))
+    }
+
+    /// Migrate old HMACs to new proper HMAC format
+    fn migrate_hmac_if_needed(
+        file_path: &Path,
+        hmac_path: &Path,
+        passphrase: &SecurePassphrase,
+    ) -> Result<bool> {
+        if !hmac_path.exists() {
+            return Ok(false);
+        }
+
+        let content = fs::read_to_string(file_path)?;
+        let stored_hmac = fs::read_to_string(hmac_path)?;
+
+        // Check if stored HMAC matches legacy format
+        let legacy_hmac = Self::compute_legacy_hmac(&content, passphrase)?;
+        if stored_hmac.trim() == legacy_hmac {
+            // Migrate to new proper HMAC format
+            log::info!("Migrating HMAC from legacy format: {:?}", hmac_path);
+            let new_hmac = Self::compute_file_hmac(&content, passphrase)?;
+            fs::write(hmac_path, new_hmac)?;
+            return Ok(true);
+        }
+
+        Ok(false)
     }
 
 
@@ -302,13 +344,25 @@ impl PgpKeyManager {
             return Ok(None);
         }
 
+        // Migrate legacy HMACs to proper format if needed
+        if let Ok(migrated) = Self::migrate_hmac_if_needed(&secret_path, &secret_hmac_path, passphrase) {
+            if migrated {
+                log::info!("Migrated secret key HMAC for user: {}", username);
+            }
+        }
+        if let Ok(migrated) = Self::migrate_hmac_if_needed(&public_path, &public_hmac_path, passphrase) {
+            if migrated {
+                log::info!("Migrated public key HMAC for user: {}", username);
+            }
+        }
+
         // Load and verify secret key
         let secret_armored = fs::read_to_string(&secret_path)?;
         if secret_hmac_path.exists() {
             let stored_hmac = fs::read_to_string(&secret_hmac_path)?;
             let computed_hmac = Self::compute_file_hmac(&secret_armored, passphrase)?;
 
-            if !bool::from(stored_hmac.as_bytes().ct_eq(computed_hmac.as_bytes())) {
+            if !bool::from(stored_hmac.trim().as_bytes().ct_eq(computed_hmac.as_bytes())) {
                 return Err(anyhow!("Secret key integrity verification failed for user: {}", username));
             }
         } else {
@@ -324,7 +378,7 @@ impl PgpKeyManager {
             let stored_hmac = fs::read_to_string(&public_hmac_path)?;
             let computed_hmac = Self::compute_file_hmac(&public_armored, passphrase)?;
 
-            if !bool::from(stored_hmac.as_bytes().ct_eq(computed_hmac.as_bytes())) {
+            if !bool::from(stored_hmac.trim().as_bytes().ct_eq(computed_hmac.as_bytes())) {
                 return Err(anyhow!("Public key integrity verification failed for user: {}", username));
             }
         } else {

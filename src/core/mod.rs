@@ -6,3 +6,6 @@ pub mod mixnet_client;
 pub mod message_router;
 pub mod auth_handler;
 pub mod chat_handler;
+pub mod key_manager;
+
+pub use key_manager::KeyManager;

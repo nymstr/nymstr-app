@@ -34,7 +34,7 @@ impl MessageCrypto {
             .ok_or_else(|| anyhow!("Missing signature in message"))?;
 
         // Deserialize the encrypted message
-        let encrypted_message: EncryptedMessage = serde_json::from_str(encrypted_data)
+        let _encrypted_message: EncryptedMessage = serde_json::from_str(encrypted_data)
             .map_err(|e| anyhow!("Failed to deserialize encrypted message: {}", e))?;
 
         // For now, handle as direct message (no MLS decryption)
@@ -108,6 +108,7 @@ impl MessageCrypto {
     }
 
     /// Validate message structure without decrypting
+    #[allow(dead_code)] // Part of public API for message validation
     pub fn validate_message_structure(envelope: &MixnetMessage) -> Result<()> {
         if envelope.sender.is_empty() {
             return Err(anyhow!("Message has empty sender"));
@@ -161,9 +162,13 @@ mod tests {
 
     fn create_test_envelope(action: &str, payload: serde_json::Value) -> MixnetMessage {
         MixnetMessage {
+            message_type: "message".to_string(),
             action: action.to_string(),
             sender: "test_sender".to_string(),
+            recipient: "test_recipient".to_string(),
             payload,
+            signature: "test_signature".to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
         }
     }
 

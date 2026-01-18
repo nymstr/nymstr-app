@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use chrono;
 use base64;
+use crate::crypto::mls::types::MlsWelcome;
 
 /// Unified message format for all Nymstr communications
 #[derive(Serialize, Deserialize, Debug)]
@@ -302,6 +303,74 @@ impl MixnetMessage {
         }
     }
 
+    /// Fetch messages from group server since a cursor
+    pub fn fetch_group(sender: &str, last_seen_id: i64, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "lastSeenId": last_seen_id
+        });
+        Self {
+            message_type: "system".into(),
+            action: "fetchGroup".into(),
+            sender: sender.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Send a message to a group server
+    pub fn send_group(sender: &str, ciphertext: &str, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "ciphertext": ciphertext
+        });
+        Self {
+            message_type: "message".into(),
+            action: "sendGroup".into(),
+            sender: sender.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Register with a group server using timestamp-based authentication
+    /// The signature should be over: "register:{username}:{server_address}:{timestamp}"
+    pub fn register_with_group_server(username: &str, public_key: &str, signature: &str, timestamp: i64, server_address: &str) -> Self {
+        let payload = serde_json::json!({
+            "username": username,
+            "publicKey": public_key,
+            "timestamp": timestamp,
+            "serverAddress": server_address
+        });
+        Self {
+            message_type: "system".into(),
+            action: "register".into(),
+            sender: username.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Create approveGroup message for admin to approve a pending user
+    pub fn approve_group_member(admin: &str, username_to_approve: &str, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "username": username_to_approve
+        });
+        Self {
+            message_type: "system".into(),
+            action: "approveGroup".into(),
+            sender: admin.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
     /// Create MLS encrypted message using unified format
     pub fn mls_message(sender: &str, recipient: &str, encrypted_message: &crate::crypto::EncryptedMessage, signature: &str) -> Self {
         let payload = serde_json::json!({
@@ -329,11 +398,323 @@ impl MixnetMessage {
         Ok(serde_json::to_string(&self.payload)?)
     }
 
-
-
     /// Serialize to JSON string
     pub fn to_json(&self) -> Result<String> {
         Ok(serde_json::to_string(self)?)
+    }
+
+    // ========== Phase 3: Welcome Flow Message Builders ==========
+
+    /// Send a Welcome message to invite a user to a group
+    ///
+    /// This creates a message containing the MLS Welcome that allows the
+    /// recipient to join the group.
+    ///
+    /// # Arguments
+    /// * `sender` - The user sending the welcome (group admin)
+    /// * `recipient` - The user being invited
+    /// * `welcome` - The MlsWelcome structure
+    /// * `signature` - PGP signature of the welcome
+    pub fn mls_welcome(sender: &str, recipient: &str, welcome: &MlsWelcome, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "group_id": welcome.group_id,
+            "cipher_suite": welcome.cipher_suite,
+            "welcome_bytes": welcome.welcome_bytes,
+            "ratchet_tree": welcome.ratchet_tree,
+            "epoch": welcome.epoch,
+            "timestamp": welcome.timestamp
+        });
+        Self {
+            message_type: "system".into(),
+            action: "mlsWelcome".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Request to join a group (with our KeyPackage)
+    ///
+    /// This is sent when a user wants to join a group and provides their
+    /// KeyPackage for the group admin to add them.
+    ///
+    /// # Arguments
+    /// * `sender` - The user requesting to join
+    /// * `group_id` - The group they want to join
+    /// * `key_package` - Base64-encoded KeyPackage
+    /// * `signature` - PGP signature of the request
+    pub fn group_join_request(sender: &str, group_id: &str, key_package: &str, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "keyPackage": key_package
+        });
+        Self {
+            message_type: "system".into(),
+            action: "groupJoinRequest".into(),
+            sender: sender.into(),
+            recipient: "server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Acknowledge receipt of a Welcome message
+    ///
+    /// Sent after successfully processing a Welcome to confirm group membership.
+    ///
+    /// # Arguments
+    /// * `sender` - The user who joined
+    /// * `recipient` - The group admin who sent the welcome
+    /// * `group_id` - The group that was joined
+    /// * `success` - Whether joining was successful
+    /// * `signature` - PGP signature of the acknowledgment
+    pub fn welcome_ack(sender: &str, recipient: &str, group_id: &str, success: bool, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "success": success
+        });
+        Self {
+            message_type: "system".into(),
+            action: "welcomeAck".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Invite a user to a group by sending them a notification
+    ///
+    /// This is used to notify a user that they have been invited and should
+    /// provide their KeyPackage to join.
+    ///
+    /// # Arguments
+    /// * `sender` - The group admin sending the invite
+    /// * `recipient` - The user being invited
+    /// * `group_id` - The group they're being invited to
+    /// * `group_name` - Optional human-readable group name
+    /// * `signature` - PGP signature of the invite
+    pub fn group_invite(sender: &str, recipient: &str, group_id: &str, group_name: Option<&str>, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "groupName": group_name.unwrap_or(group_id)
+        });
+        Self {
+            message_type: "system".into(),
+            action: "groupInvite".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Request a KeyPackage from a user (for adding them to a group)
+    ///
+    /// # Arguments
+    /// * `sender` - The group admin requesting the KeyPackage
+    /// * `recipient` - The user to request the KeyPackage from
+    /// * `group_id` - The group they'll be added to
+    /// * `signature` - PGP signature of the request
+    pub fn key_package_for_group(sender: &str, recipient: &str, group_id: &str, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "purpose": "groupJoin"
+        });
+        Self {
+            message_type: "system".into(),
+            action: "keyPackageForGroup".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Provide a KeyPackage in response to a request (for group joining)
+    ///
+    /// # Arguments
+    /// * `sender` - The user providing their KeyPackage
+    /// * `recipient` - The group admin who requested it
+    /// * `group_id` - The group they want to join
+    /// * `key_package` - Base64-encoded KeyPackage
+    /// * `signature` - PGP signature of the response
+    pub fn key_package_for_group_response(
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        key_package: &str,
+        signature: &str,
+    ) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "keyPackage": key_package
+        });
+        Self {
+            message_type: "system".into(),
+            action: "keyPackageForGroupResponse".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    // ========== MLS Delivery Service Message Builders ==========
+
+    /// Register with a group server including an MLS KeyPackage
+    /// This allows the server to store the KeyPackage for later use when
+    /// the user is added to groups.
+    ///
+    /// # Arguments
+    /// * `username` - The user registering
+    /// * `public_key` - The user's PGP public key (armored)
+    /// * `signature` - PGP signature over "register:{username}:{server_address}:{timestamp}"
+    /// * `timestamp` - Unix timestamp for replay protection
+    /// * `server_address` - The group server's mixnet address
+    /// * `key_package` - Optional base64-encoded MLS KeyPackage
+    pub fn register_with_group_server_and_key_package(
+        username: &str,
+        public_key: &str,
+        signature: &str,
+        timestamp: i64,
+        server_address: &str,
+        key_package: Option<&str>,
+    ) -> Self {
+        let mut payload = serde_json::json!({
+            "username": username,
+            "publicKey": public_key,
+            "timestamp": timestamp,
+            "serverAddress": server_address
+        });
+        if let Some(kp) = key_package {
+            payload["keyPackage"] = serde_json::json!(kp);
+        }
+        Self {
+            message_type: "system".into(),
+            action: "register".into(),
+            sender: username.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Store a Welcome message on the group server for a user to fetch later
+    ///
+    /// # Arguments
+    /// * `sender` - The admin/sender storing the welcome
+    /// * `group_id` - The MLS group ID
+    /// * `target_username` - The user who should receive the Welcome
+    /// * `welcome` - Base64-encoded Welcome message
+    /// * `signature` - PGP signature over "{group_id}:{target_username}"
+    pub fn store_welcome(
+        sender: &str,
+        group_id: &str,
+        target_username: &str,
+        welcome: &str,
+        signature: &str,
+    ) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "targetUsername": target_username,
+            "welcome": welcome
+        });
+        Self {
+            message_type: "system".into(),
+            action: "storeWelcome".into(),
+            sender: sender.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Fetch pending Welcome messages from the group server
+    ///
+    /// # Arguments
+    /// * `username` - The user fetching their Welcomes
+    /// * `group_id` - Optional group ID to filter by
+    /// * `signature` - PGP signature over "fetchWelcome:{username}"
+    pub fn fetch_welcome(username: &str, group_id: Option<&str>, signature: &str) -> Self {
+        let mut payload = serde_json::json!({});
+        if let Some(gid) = group_id {
+            payload["groupId"] = serde_json::json!(gid);
+        }
+        Self {
+            message_type: "system".into(),
+            action: "fetchWelcome".into(),
+            sender: username.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Request epoch sync from the group server
+    /// Returns all commits since the given epoch for catch-up
+    ///
+    /// # Arguments
+    /// * `username` - The user requesting sync
+    /// * `group_id` - The MLS group ID
+    /// * `since_epoch` - The epoch to sync from (exclusive)
+    /// * `signature` - PGP signature over "{group_id}:{since_epoch}"
+    pub fn sync_epoch(username: &str, group_id: &str, since_epoch: i64, signature: &str) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "sinceEpoch": since_epoch
+        });
+        Self {
+            message_type: "system".into(),
+            action: "syncEpoch".into(),
+            sender: username.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Buffer a commit message on the group server for epoch sync
+    /// This allows late joiners to catch up on missed commits
+    ///
+    /// # Arguments
+    /// * `username` - The user buffering the commit
+    /// * `group_id` - The MLS group ID
+    /// * `epoch` - The epoch of this commit
+    /// * `commit` - Base64-encoded commit message
+    /// * `signature` - PGP signature over "{group_id}:{epoch}"
+    pub fn buffer_commit(
+        username: &str,
+        group_id: &str,
+        epoch: i64,
+        commit: &str,
+        signature: &str,
+    ) -> Self {
+        let payload = serde_json::json!({
+            "groupId": group_id,
+            "epoch": epoch,
+            "commit": commit
+        });
+        Self {
+            message_type: "system".into(),
+            action: "bufferCommit".into(),
+            sender: username.into(),
+            recipient: "group-server".into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
     }
 }
 

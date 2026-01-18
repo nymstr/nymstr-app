@@ -1,7 +1,7 @@
 [package]
 name = "nymstr"
-version = "0.1.0"
-edition = "2024"
+version = "0.2.0"
+edition = "2021"
 
 [dependencies]
 crossterm = "0.28.1"
@@ -38,6 +38,8 @@ zeroize = { version = "1.7", features = ["derive"] }
 subtle = "2.5"
 rand = "0.8"
 libc = "0.2"
+hmac = "0.12"
+aes-gcm = "0.10"
 # MLS dependencies
 mls-rs = { version = "0.51.0", features = ["sqlite"] }
 mls-rs-core = "0.24.0"

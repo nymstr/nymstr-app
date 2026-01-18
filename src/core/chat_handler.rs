@@ -2,16 +2,16 @@
 //!
 //! Handles regular chat messages and handshakes.
 
-use crate::core::{db::Db, mixnet_client::MixnetService};
-use crate::crypto::{MessageCrypto, VerifiedMessage, Crypto};
+use crate::core::db::Db;
+use crate::crypto::{MessageCrypto, Crypto};
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use log::{info, warn, error};
-use pgp::composed::SignedPublicKey;
 use std::sync::Arc;
 
 /// Result of processing a chat message
 #[derive(Debug)]
+#[allow(dead_code)] // Some variants used for future message types
 pub enum ChatResult {
     /// Regular text message from sender
     TextMessage { sender: String, content: String },
@@ -63,8 +63,10 @@ impl ChatHandler {
         // Decrypt and verify the message
         let verified = MessageCrypto::decrypt_and_verify_chat_message(envelope, sender_public_key.as_ref())?;
 
+        // SECURITY: Reject messages with invalid signatures
         if !verified.signature_valid {
-            warn!("Message from {} failed signature verification, but processing anyway", envelope.sender);
+            error!("Message from {} rejected: signature verification failed", envelope.sender);
+            return Err(anyhow!("Message from {} rejected: signature verification failed", envelope.sender));
         }
 
         // Save message to database
@@ -89,6 +91,7 @@ impl ChatHandler {
     }
 
     /// Update handler state
+    #[allow(dead_code)] // Part of public API for state management
     pub fn update_current_user(&mut self, current_user: Option<String>) {
         self.current_user = current_user;
     }
@@ -101,9 +104,13 @@ mod tests {
 
     fn create_test_envelope(action: &str, payload: serde_json::Value) -> crate::core::messages::MixnetMessage {
         crate::core::messages::MixnetMessage {
+            message_type: "message".to_string(),
             action: action.to_string(),
             sender: "test_sender".to_string(),
+            recipient: "test_recipient".to_string(),
             payload,
+            signature: "test_signature".to_string(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
         }
     }
 
