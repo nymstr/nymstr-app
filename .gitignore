@@ -2,3 +2,7 @@ target/
 .env
 Cargo.lock
 storage/
+logs/
+*.log
+*.db
+secrets/
