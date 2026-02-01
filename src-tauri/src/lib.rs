@@ -22,9 +22,14 @@ use crate::state::AppState;
 
 /// Initialize logging
 fn init_logging() {
+    let filter = EnvFilter::from_default_env()
+        .add_directive("nymstr_app_v2=info".parse().unwrap_or_else(|_| {
+            tracing_subscriber::filter::LevelFilter::INFO.into()
+        }));
+
     tracing_subscriber::registry()
         .with(fmt::layer())
-        .with(EnvFilter::from_default_env().add_directive("nymstr_app_v2=info".parse().unwrap()))
+        .with(filter)
         .init();
 }
 
