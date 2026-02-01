@@ -11,7 +11,7 @@ interface MessageInputProps {
 export function MessageInput({
   onSend,
   disabled = false,
-  placeholder = 'Type a message...',
+  placeholder = 'Write a message...',
 }: MessageInputProps) {
   const [message, setMessage] = useState('');
   const [isFocused, setIsFocused] = useState(false);
@@ -43,15 +43,15 @@ export function MessageInput({
   const canSend = message.trim() && !disabled;
 
   return (
-    <div className="flex-shrink-0 px-4 py-3 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)]">
-      <div className="flex items-end gap-2">
+    <div className="flex-shrink-0 px-5 py-4 bg-[var(--color-bg-secondary)] border-t border-[var(--color-border)]">
+      <div className="flex items-end gap-2.5">
         {/* Attachment button */}
         <button
           className={cn(
-            'flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center',
+            'flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center',
             'text-[var(--color-text-muted)]',
             'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)]',
-            'transition-colors duration-150'
+            'transition-all duration-150'
           )}
           title="Attach file"
         >
@@ -61,10 +61,10 @@ export function MessageInput({
         {/* Input container */}
         <div
           className={cn(
-            'flex-1 flex items-end rounded-xl px-3 py-2 min-h-[40px]',
+            'flex-1 flex items-end rounded-xl px-4 py-2.5 min-h-[44px]',
             'bg-[var(--color-bg-tertiary)]',
-            'border border-[var(--color-border-subtle)]',
-            'transition-all duration-150',
+            'border border-[var(--color-border)]',
+            'transition-all duration-200',
             isFocused && 'border-[var(--color-accent)] shadow-[0_0_0_3px_var(--color-accent-muted)]'
           )}
         >
@@ -90,10 +90,10 @@ export function MessageInput({
           />
           <button
             className={cn(
-              'flex-shrink-0 ml-2 w-7 h-7 rounded-md flex items-center justify-center',
+              'flex-shrink-0 ml-2 w-8 h-8 rounded-md flex items-center justify-center',
               'text-[var(--color-text-muted)]',
               'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)]',
-              'transition-colors duration-150'
+              'transition-all duration-150'
             )}
             title="Emoji"
           >
@@ -101,24 +101,38 @@ export function MessageInput({
           </button>
         </div>
 
-        {/* Send button */}
+        {/* Send button - Seal/wax stamp aesthetic */}
         <button
           onClick={handleSend}
           disabled={!canSend}
           className={cn(
-            'flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center',
-            'transition-all duration-150',
+            'flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center',
+            'transition-all duration-200 relative overflow-hidden btn-ripple',
             canSend
-              ? 'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] shadow-[0_0_12px_rgba(59,130,246,0.3)]'
+              ? 'bg-[var(--color-accent)] text-[var(--color-bg-primary)] shadow-[var(--shadow-glow-sm)] hover:shadow-[var(--shadow-glow)]'
               : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed'
           )}
           title="Send message"
         >
+          {/* Subtle gradient overlay */}
+          {canSend && (
+            <div className="absolute inset-0 bg-gradient-to-b from-white/10 to-transparent pointer-events-none" />
+          )}
           <Send className={cn(
-            'w-[18px] h-[18px] transition-transform duration-150',
-            canSend && '-translate-x-px -translate-y-px'
+            'w-[18px] h-[18px] relative z-10 transition-transform duration-200',
+            canSend && '-translate-x-0.5 -translate-y-0.5'
           )} />
         </button>
+      </div>
+
+      {/* Encryption indicator */}
+      <div className="flex items-center justify-center mt-2">
+        <span className="text-[10px] text-[var(--color-text-faint)] flex items-center gap-1.5">
+          <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2 6V5a2 2 0 1 0-4 0v2h4z"/>
+          </svg>
+          Messages are end-to-end encrypted
+        </span>
       </div>
     </div>
   );

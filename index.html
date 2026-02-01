@@ -2,9 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>Nymstr - Private Messaging</title>
+    <meta name="description" content="Privacy-first messaging through the Nym mixnet" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/nymstr-icon.svg" />
+
+    <!-- Font preconnect for faster loading -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- Theme color for browser chrome -->
+    <meta name="theme-color" content="#0d0c0a" />
+
+    <!-- Prevent FOUC with initial dark background -->
+    <style>
+      html, body, #root {
+        background-color: #0d0c0a;
+        color: #e8e4de;
+      }
+    </style>
   </head>
 
   <body>

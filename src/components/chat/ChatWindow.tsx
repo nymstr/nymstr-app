@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { Phone, Video, MoreVertical, Lock } from 'lucide-react';
+import { Phone, Video, MoreVertical } from 'lucide-react';
 import { Avatar } from '../ui/Avatar';
 import { MessageList, MessageListRef } from './MessageList';
 import { MessageInput } from './MessageInput';
@@ -74,8 +74,8 @@ export function ChatHeader({
   actions,
 }: ChatHeaderProps) {
   return (
-    <div className="flex-shrink-0 flex items-center justify-between h-14 px-4 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
-      <div className="flex items-center gap-3 min-w-0">
+    <div className="flex-shrink-0 flex items-center justify-between h-16 px-5 bg-[var(--color-bg-secondary)] border-b border-[var(--color-border)]">
+      <div className="flex items-center gap-3.5 min-w-0">
         <Avatar
           fallback={name}
           src={avatarUrl}
@@ -83,13 +83,21 @@ export function ChatHeader({
           online={!isGroup ? online : undefined}
         />
         <div className="min-w-0">
-          <h2 className="text-[14px] font-semibold text-[var(--color-text-primary)] truncate">
+          <h2 className="text-[15px] font-medium text-[var(--color-text-primary)] truncate tracking-tight">
             {name}
           </h2>
-          <p className="text-[12px] text-[var(--color-text-muted)] truncate">
-            {isGroup && memberCount
-              ? `${memberCount} members`
-              : subtitle}
+          <p className="text-[12px] text-[var(--color-text-muted)] truncate flex items-center gap-1.5">
+            {isGroup && memberCount ? (
+              <>
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-secondary)]" />
+                {memberCount} members
+              </>
+            ) : (
+              <>
+                {online && <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-success)] animate-status-pulse" />}
+                {subtitle}
+              </>
+            )}
           </p>
         </div>
       </div>
@@ -112,7 +120,7 @@ export function ChatHeader({
 function IconButton({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
   return (
     <button
-      className="w-8 h-8 rounded-lg flex items-center justify-center text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-colors"
+      className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--color-text-muted)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)] transition-all duration-150"
       title={title}
     >
       <Icon className="w-[18px] h-[18px]" />
@@ -133,29 +141,90 @@ export function ChatWindow({ conversation }: ChatWindowProps) {
 }
 
 // ============================================================================
-// Empty State
+// Empty State - Signal Void Aesthetic
 // ============================================================================
 
 export function EmptyChatWindow() {
   return (
-    <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg-primary)] text-[var(--color-text-secondary)]">
-      <div className="relative mb-6">
-        <div className="w-20 h-20 rounded-2xl bg-[var(--color-bg-tertiary)] flex items-center justify-center">
-          <Lock className="w-10 h-10 text-[var(--color-text-muted)]" />
-        </div>
-        <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-lg bg-[var(--color-accent)] flex items-center justify-center shadow-[0_0_12px_rgba(59,130,246,0.4)]">
-          <span className="text-white text-sm font-medium">+</span>
+    <div className="flex-1 flex flex-col items-center justify-center bg-[var(--color-bg-primary)] vignette">
+      {/* Emblem */}
+      <div className="relative mb-8">
+        <div className="absolute inset-0 rounded-full bg-[var(--color-accent)]/10 blur-2xl scale-150" />
+        <div className="relative w-24 h-24">
+          <svg
+            viewBox="0 0 96 96"
+            className="w-full h-full"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* Outer decorative ring */}
+            <circle
+              cx="48"
+              cy="48"
+              r="44"
+              stroke="var(--color-border)"
+              strokeWidth="1"
+              strokeDasharray="6 4"
+            />
+            {/* Inner circle */}
+            <circle
+              cx="48"
+              cy="48"
+              r="36"
+              fill="var(--color-bg-tertiary)"
+              stroke="var(--color-border)"
+              strokeWidth="1"
+            />
+            {/* Signal waves */}
+            <path
+              d="M48 24 Q60 36 48 48 Q36 36 48 24"
+              fill="var(--color-accent)"
+              opacity="0.2"
+            />
+            <path
+              d="M48 18 Q66 32 48 48 Q30 32 48 18"
+              fill="none"
+              stroke="var(--color-accent)"
+              strokeWidth="1"
+              opacity="0.4"
+            />
+            <path
+              d="M48 12 Q72 28 48 48 Q24 28 48 12"
+              fill="none"
+              stroke="var(--color-accent)"
+              strokeWidth="1"
+              opacity="0.2"
+            />
+            {/* Keyhole */}
+            <circle cx="48" cy="40" r="8" fill="var(--color-accent)" />
+            <path
+              d="M44 46 L44 64 Q44 68 48 68 Q52 68 52 64 L52 46"
+              fill="var(--color-accent)"
+            />
+          </svg>
         </div>
       </div>
-      <h2 className="text-lg font-semibold mb-2 text-[var(--color-text-primary)]">
-        Welcome to Nymstr
+
+      {/* Text content */}
+      <h2 className="font-display text-xl font-medium mb-3 text-[var(--color-text-primary)]">
+        Welcome to the Void
       </h2>
-      <p className="text-[13px] text-center max-w-sm leading-relaxed text-[var(--color-text-muted)]">
-        Privacy-first messaging powered by the Nym mixnet.
+      <p className="text-[14px] text-center max-w-sm leading-relaxed text-[var(--color-text-muted)] mb-4">
+        Privacy-first messaging through the Nym mixnet.
         <br />
-        Your messages are end-to-end encrypted with MLS.
+        Your words are cloaked in layers of encryption.
       </p>
-      <p className="text-[12px] mt-4 text-[var(--color-text-faint)]">
+
+      {/* Encryption badge */}
+      <div className="encrypted-badge animate-float">
+        <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2 6V5a2 2 0 1 0-4 0v2h4z"/>
+        </svg>
+        MLS Encrypted
+      </div>
+
+      {/* Hint */}
+      <p className="text-[12px] mt-8 text-[var(--color-text-faint)]">
         Select a conversation or start a new chat
       </p>
     </div>

@@ -4,10 +4,17 @@ import { cn } from './utils';
 import { useToastStore, type Toast as ToastType, type ToastVariant } from '../../stores/toastStore';
 
 const variantStyles: Record<ToastVariant, string> = {
-  success: 'border-l-[var(--color-success)] bg-[var(--color-success)]/10',
-  error: 'border-l-[var(--color-error)] bg-[var(--color-error)]/10',
-  warning: 'border-l-[var(--color-warning)] bg-[var(--color-warning)]/10',
-  info: 'border-l-[var(--color-accent)] bg-[var(--color-accent)]/10',
+  success: 'border-l-[var(--color-success)]',
+  error: 'border-l-[var(--color-error)]',
+  warning: 'border-l-[var(--color-warning)]',
+  info: 'border-l-[var(--color-accent)]',
+};
+
+const variantBgStyles: Record<ToastVariant, string> = {
+  success: 'bg-[var(--color-success)]/5',
+  error: 'bg-[var(--color-error)]/5',
+  warning: 'bg-[var(--color-warning)]/5',
+  info: 'bg-[var(--color-accent)]/5',
 };
 
 const variantIcons: Record<ToastVariant, React.ComponentType<{ className?: string }>> = {
@@ -35,32 +42,40 @@ function ToastItem({ toast, onDismiss }: ToastProps) {
 
   const handleDismiss = () => {
     setIsExiting(true);
-    setTimeout(onDismiss, 200);
+    setTimeout(onDismiss, 250);
   };
 
   return (
     <div
       className={cn(
-        'relative flex items-start gap-3 p-4 rounded-lg border-l-4 border border-[var(--color-border)]',
-        'bg-[var(--color-bg-secondary)] shadow-lg',
-        'transition-all duration-200 ease-out',
+        'relative flex items-start gap-3 p-4 rounded-lg border-l-[3px] border border-[var(--color-border)]',
+        'bg-[var(--color-bg-secondary)] shadow-[var(--shadow-lg)]',
+        'transition-all duration-250',
         variantStyles[toast.variant],
-        isExiting ? 'animate-toast-exit' : 'animate-toast-enter'
+        variantBgStyles[toast.variant],
+        isExiting
+          ? 'opacity-0 translate-x-4 scale-95'
+          : 'animate-slide-in-left'
       )}
       role="alert"
     >
-      <Icon className={cn('w-5 h-5 flex-shrink-0 mt-0.5', variantIconColors[toast.variant])} />
+      <div className={cn(
+        'w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0',
+        variantBgStyles[toast.variant]
+      )}>
+        <Icon className={cn('w-4 h-4', variantIconColors[toast.variant])} />
+      </div>
 
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-[var(--color-text-primary)]">{toast.title}</p>
+      <div className="flex-1 min-w-0 py-0.5">
+        <p className="font-medium text-[13px] text-[var(--color-text-primary)]">{toast.title}</p>
         {toast.message && (
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">{toast.message}</p>
+          <p className="mt-1 text-[12px] text-[var(--color-text-secondary)] leading-relaxed">{toast.message}</p>
         )}
       </div>
 
       <button
         onClick={handleDismiss}
-        className="flex-shrink-0 p-1 rounded hover:bg-[var(--color-bg-hover)] transition-colors"
+        className="flex-shrink-0 w-7 h-7 rounded-md flex items-center justify-center hover:bg-[var(--color-bg-hover)] transition-colors"
         aria-label="Dismiss notification"
       >
         <X className="w-4 h-4 text-[var(--color-text-muted)]" />
@@ -77,7 +92,7 @@ export function ToastContainer() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm w-full pointer-events-none"
+      className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2.5 max-w-sm w-full pointer-events-none"
       aria-live="polite"
       aria-label="Notifications"
     >
@@ -86,7 +101,7 @@ export function ToastContainer() {
           key={toast.id}
           className="pointer-events-auto"
           style={{
-            animationDelay: `${index * 50}ms`,
+            animationDelay: `${index * 60}ms`,
           }}
         >
           <ToastItem toast={toast} onDismiss={() => removeToast(toast.id)} />

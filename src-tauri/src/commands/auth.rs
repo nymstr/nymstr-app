@@ -77,14 +77,8 @@ pub async fn register_user(
     // 1. Validate username
     validate_username(&username)?;
 
-    // Validate passphrase
-    if passphrase.len() < 12 {
-        return Err(ApiError::validation(
-            "Passphrase must be at least 12 characters",
-        ));
-    }
-
     // 2. Generate PGP keypair
+    tracing::debug!("Creating secure passphrase");
     let secure_passphrase = SecurePassphrase::new(passphrase);
 
     let (secret_key, public_key) =

@@ -7,10 +7,29 @@ import {
   useImperativeHandle,
   ReactNode,
 } from 'react';
-import { Loader2, Lock } from 'lucide-react';
 import { cn } from '../ui/utils';
 import { Message, calculateMessagePositions } from './Message';
 import type { Message as MessageType } from '../../types';
+
+// ============================================================================
+// Cipher Loader (inline for MessageList)
+// ============================================================================
+
+function CipherLoader({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+  const sizes = {
+    sm: 'w-6 h-6',
+    md: 'w-10 h-10',
+    lg: 'w-14 h-14',
+  };
+
+  return (
+    <div className={cn('cipher-loader', sizes[size])}>
+      <div className="outer" />
+      <div className="inner" />
+      <div className="center" />
+    </div>
+  );
+}
 
 // ============================================================================
 // MessageList Component with Smart Auto-scroll
@@ -64,7 +83,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
       const container = containerRef.current;
       if (!container) return true;
 
-      const threshold = 50; // pixels from bottom
+      const threshold = 50;
       const { scrollTop, scrollHeight, clientHeight } = container;
       return scrollHeight - scrollTop - clientHeight <= threshold;
     }, []);
@@ -94,7 +113,6 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
     // Auto-scroll on new messages if at bottom
     useEffect(() => {
       if (isInitialMount.current) {
-        // Instant scroll on first mount
         scrollToBottom('instant');
         isInitialMount.current = false;
         return;
@@ -112,7 +130,6 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
 
       const handleScrollTop = () => {
         if (container.scrollTop === 0 && !loadingMore) {
-          // Save scroll position to restore after loading
           lastScrollHeight.current = container.scrollHeight;
           onLoadMore();
         }
@@ -140,8 +157,9 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
     // Loading state
     if (loading) {
       return (
-        <div className={cn('flex-1 flex items-center justify-center', className)}>
-          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-accent)]" />
+        <div className={cn('flex-1 flex flex-col items-center justify-center gap-4', className)}>
+          <CipherLoader size="lg" />
+          <p className="text-[13px] text-[var(--color-text-muted)]">Decrypting messages...</p>
         </div>
       );
     }
@@ -151,7 +169,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
         ref={containerRef}
         onScroll={handleScroll}
         className={cn(
-          'flex-1 overflow-y-auto p-4',
+          'flex-1 overflow-y-auto px-5 py-4',
           'scroll-smooth',
           className
         )}
@@ -159,16 +177,21 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
         {/* Loading more indicator (top) */}
         {loadingMore && (
           <div className="flex justify-center py-4">
-            <Loader2 className="w-5 h-5 animate-spin text-[var(--color-text-muted)]" />
+            <CipherLoader size="sm" />
           </div>
         )}
 
-        {/* Encryption notice */}
+        {/* Encryption notice - styled as chapter divider */}
         {showEncryptionNotice && (
-          <div className="flex items-center justify-center py-4 mb-4">
-            <div className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[var(--color-bg-tertiary)]/60 border border-[var(--color-border-subtle)]">
-              <Lock className="w-3 h-3 text-emerald-400" />
-              <span className="text-[11px] text-[var(--color-text-muted)]">End-to-end encrypted with MLS</span>
+          <div className="flex items-center justify-center py-6 mb-4">
+            <div className="divider-chapter">
+              <svg className="w-4 h-4 text-[var(--color-secondary)]" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2 6V5a2 2 0 1 0-4 0v2h4z"/>
+              </svg>
+              <span>Encrypted Channel</span>
+              <svg className="w-4 h-4 text-[var(--color-secondary)]" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 1a4 4 0 0 0-4 4v2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a1 1 0 0 0-1-1h-1V5a4 4 0 0 0-4-4zm2 6V5a2 2 0 1 0-4 0v2h4z"/>
+              </svg>
             </div>
           </div>
         )}
@@ -176,9 +199,17 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
         {/* Empty state */}
         {messages.length === 0 && (
           emptyState || (
-            <div className="flex-1 flex flex-col items-center justify-center h-full text-center py-12">
-              <p className="text-[13px] text-[var(--color-text-muted)]">No messages yet</p>
-              <p className="text-[12px] text-[var(--color-text-faint)] mt-1">Send a message to start the conversation</p>
+            <div className="empty-state h-full">
+              <div className="w-16 h-16 rounded-full bg-[var(--color-bg-tertiary)] flex items-center justify-center mb-6 border border-[var(--color-border)]">
+                <svg className="w-7 h-7 text-[var(--color-text-muted)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
+                </svg>
+              </div>
+              <p className="empty-state-title font-display">The channel is clear</p>
+              <p className="empty-state-description">
+                Send a message to begin the encrypted conversation.
+                Your words travel through the void, visible only to those with the key.
+              </p>
             </div>
           )
         )}
@@ -197,7 +228,7 @@ export const MessageList = forwardRef<MessageListRef, MessageListProps>(
 
         {/* Typing indicator */}
         {typingIndicator && (
-          <div className="mt-2">
+          <div className="mt-3">
             {typingIndicator}
           </div>
         )}
@@ -225,19 +256,28 @@ export function TypingIndicator({ users = [], className }: TypingIndicatorProps)
 
   const text =
     users.length === 1
-      ? `${users[0]} is typing`
+      ? `${users[0]} is composing`
       : users.length === 2
-      ? `${users[0]} and ${users[1]} are typing`
-      : `${users[0]} and ${users.length - 1} others are typing`;
+      ? `${users[0]} and ${users[1]} are composing`
+      : `${users[0]} and ${users.length - 1} others are composing`;
 
   return (
-    <div className={cn('flex items-center gap-2 px-4 py-2', className)}>
-      <div className="flex gap-0.5">
-        <span className="w-1.5 h-1.5 bg-[var(--color-text-muted)] rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-1.5 h-1.5 bg-[var(--color-text-muted)] rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-        <span className="w-1.5 h-1.5 bg-[var(--color-text-muted)] rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+    <div className={cn('flex items-center gap-3 px-4 py-2', className)}>
+      <div className="flex gap-1">
+        <span
+          className="w-2 h-2 bg-[var(--color-accent)] rounded-full animate-pulse-subtle"
+          style={{ animationDelay: '0ms' }}
+        />
+        <span
+          className="w-2 h-2 bg-[var(--color-accent)] rounded-full animate-pulse-subtle"
+          style={{ animationDelay: '200ms' }}
+        />
+        <span
+          className="w-2 h-2 bg-[var(--color-accent)] rounded-full animate-pulse-subtle"
+          style={{ animationDelay: '400ms' }}
+        />
       </div>
-      <span className="text-[12px] text-[var(--color-text-muted)]">{text}</span>
+      <span className="text-[12px] text-[var(--color-text-muted)] italic">{text}</span>
     </div>
   );
 }
@@ -253,10 +293,8 @@ interface MessageSeparatorProps {
 
 export function MessageSeparator({ children, className }: MessageSeparatorProps) {
   return (
-    <div className={cn('flex items-center gap-4 my-5', className)}>
-      <div className="flex-1 h-px bg-[var(--color-border)]" />
-      <span className="text-[11px] text-[var(--color-text-muted)] px-3 py-1 rounded-full bg-[var(--color-bg-tertiary)]">{children}</span>
-      <div className="flex-1 h-px bg-[var(--color-border)]" />
+    <div className={cn('divider-chapter my-6', className)}>
+      {children}
     </div>
   );
 }

@@ -17,16 +17,16 @@ const sizeConfig = {
   xl: { container: 'w-16 h-16', text: 'text-[18px]', indicator: 'w-3.5 h-3.5 border-2' },
 };
 
-// Sophisticated color palette - muted, refined tones
+// Signal Void color palette - warm, earthy, muted tones
 const avatarColors = [
-  { bg: 'bg-blue-600/90', text: 'text-blue-100' },
-  { bg: 'bg-emerald-600/90', text: 'text-emerald-100' },
-  { bg: 'bg-violet-600/90', text: 'text-violet-100' },
-  { bg: 'bg-amber-600/90', text: 'text-amber-100' },
-  { bg: 'bg-rose-600/90', text: 'text-rose-100' },
-  { bg: 'bg-cyan-600/90', text: 'text-cyan-100' },
-  { bg: 'bg-indigo-600/90', text: 'text-indigo-100' },
-  { bg: 'bg-teal-600/90', text: 'text-teal-100' },
+  { bg: 'bg-amber-700/80', text: 'text-amber-100' },      // Gold/ochre
+  { bg: 'bg-emerald-800/80', text: 'text-emerald-100' },  // Verdigris
+  { bg: 'bg-stone-600/80', text: 'text-stone-100' },      // Stone
+  { bg: 'bg-rose-800/80', text: 'text-rose-100' },        // Terracotta
+  { bg: 'bg-slate-600/80', text: 'text-slate-100' },      // Slate
+  { bg: 'bg-orange-800/80', text: 'text-orange-100' },    // Rust
+  { bg: 'bg-teal-800/80', text: 'text-teal-100' },        // Deep teal
+  { bg: 'bg-zinc-600/80', text: 'text-zinc-100' },        // Charcoal
 ];
 
 // Generate consistent color based on string
@@ -67,7 +67,9 @@ export function Avatar({ src, fallback, size = 'md', online, className }: Avatar
           className={cn(
             'rounded-full flex items-center justify-center',
             'font-semibold tracking-tight',
-            'ring-1 ring-white/10',
+            'ring-1 ring-white/5',
+            // Subtle inner shadow for depth
+            'shadow-[inset_0_1px_2px_rgba(0,0,0,0.2)]',
             config.container,
             config.text,
             color.bg,
@@ -78,7 +80,7 @@ export function Avatar({ src, fallback, size = 'md', online, className }: Avatar
         </div>
       )}
 
-      {/* Online indicator */}
+      {/* Online indicator with warm glow */}
       {online !== undefined && (
         <span
           className={cn(
@@ -86,7 +88,7 @@ export function Avatar({ src, fallback, size = 'md', online, className }: Avatar
             'border-[var(--color-bg-secondary)]',
             config.indicator,
             online
-              ? 'bg-[var(--color-success)] shadow-[0_0_6px_rgba(34,197,94,0.5)]'
+              ? 'bg-[var(--color-success)] shadow-[0_0_6px_rgba(122,159,125,0.6)] animate-status-pulse'
               : 'bg-[var(--color-text-muted)]'
           )}
         />

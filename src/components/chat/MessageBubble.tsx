@@ -13,19 +13,23 @@ export function MessageBubble({ message, onRetry }: MessageBubbleProps) {
   return (
     <div
       className={cn(
-        'flex animate-slide-up',
+        'flex message-enter',
         isOwn ? 'justify-end' : 'justify-start'
       )}
     >
       <div
         className={cn(
-          'message-bubble px-4 py-2',
+          'message-bubble px-4 py-2.5',
           isOwn ? 'message-own' : 'message-other'
         )}
       >
-        <p className="break-words whitespace-pre-wrap">{content}</p>
-        <div className="flex items-center justify-end gap-1 mt-1">
-          <span className="text-xs opacity-70">{formatTime(timestamp)}</span>
+        <p className="break-words whitespace-pre-wrap text-[14px] leading-[1.55]">
+          {content}
+        </p>
+        <div className="flex items-center justify-end gap-2 mt-1.5">
+          <span className="text-[10px] font-mono tabular-nums text-[var(--color-text-muted)]">
+            {formatTime(timestamp)}
+          </span>
           {isOwn && <MessageStatus status={status} onRetry={onRetry} />}
         </div>
       </div>

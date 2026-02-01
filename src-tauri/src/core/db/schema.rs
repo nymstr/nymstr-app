@@ -71,7 +71,6 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Pending MLS messages table - epoch buffer for reordering
-    // Note: This schema must match the one in crypto/mls/epoch_buffer.rs
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS pending_mls_messages (
@@ -81,8 +80,8 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
             mls_message_b64 TEXT NOT NULL,
             received_at TEXT NOT NULL DEFAULT (datetime('now')),
             retry_count INTEGER NOT NULL DEFAULT 0,
-            processed INTEGER NOT NULL DEFAULT 0,
-            failed INTEGER NOT NULL DEFAULT 0,
+            last_retry_at TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
             error_message TEXT
         )
         "#,
@@ -354,7 +353,7 @@ async fn create_indexes(db: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
 
     // Pending MLS messages index
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pending_mls_conv_processed ON pending_mls_messages(conversation_id, processed)")
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pending_mls_status ON pending_mls_messages(conversation_id, status)")
         .execute(db)
         .await?;
 

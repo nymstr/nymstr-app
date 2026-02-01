@@ -15,7 +15,10 @@ interface MessageHeaderProps {
 
 function MessageHeader({ children, className }: MessageHeaderProps) {
   return (
-    <div className={cn('text-[12px] font-medium text-[var(--color-accent)] mb-1', className)}>
+    <div className={cn(
+      'text-[11px] font-medium text-[var(--color-accent)] mb-1.5 uppercase tracking-wide',
+      className
+    )}>
       {children}
     </div>
   );
@@ -28,7 +31,7 @@ interface MessageFooterProps {
 
 function MessageFooter({ children, className }: MessageFooterProps) {
   return (
-    <div className={cn('flex items-center justify-end gap-1.5 mt-1', className)}>
+    <div className={cn('flex items-center justify-end gap-2 mt-1.5', className)}>
       {children}
     </div>
   );
@@ -41,7 +44,10 @@ interface MessageContentProps {
 
 function MessageContent({ children, className }: MessageContentProps) {
   return (
-    <div className={cn('text-[14px] leading-relaxed break-words whitespace-pre-wrap', className)}>
+    <div className={cn(
+      'text-[14px] leading-[1.55] break-words whitespace-pre-wrap',
+      className
+    )}>
       {children}
     </div>
   );
@@ -56,8 +62,8 @@ interface MessageTimeProps {
 function MessageTime({ time, isOwn, className }: MessageTimeProps) {
   return (
     <span className={cn(
-      'text-[10px]',
-      isOwn ? 'text-white/60' : 'text-[var(--color-text-muted)]',
+      'text-[10px] font-mono tabular-nums',
+      isOwn ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-muted)]',
       className
     )}>
       {time}
@@ -99,18 +105,17 @@ export function Message({
 
   const direction: MessageDirection = isOwn ? 'outgoing' : 'incoming';
   const shouldShowAvatar = showAvatar && (position === 'single' || position === 'last');
-  const avatarSpacer = showAvatar && !shouldShowAvatar;
 
   return (
     <div
       className={cn(
-        'flex gap-2 animate-fade-up',
+        'flex gap-2.5',
         direction === 'outgoing' ? 'flex-row-reverse' : 'flex-row',
         // Position-based spacing
-        position === 'single' && 'mb-3',
-        position === 'first' && 'mb-0.5',
-        position === 'normal' && 'mb-0.5',
-        position === 'last' && 'mb-3',
+        position === 'single' && 'mb-4',
+        position === 'first' && 'mb-1',
+        position === 'normal' && 'mb-1',
+        position === 'last' && 'mb-4',
         className
       )}
       data-direction={direction}
@@ -134,10 +139,10 @@ export function Message({
       {/* Message bubble */}
       <div
         className={cn(
-          'max-w-[75%] px-3.5 py-2 relative',
+          'message-bubble max-w-[72%] px-4 py-2.5 relative message-enter',
           direction === 'outgoing'
-            ? 'bg-[var(--color-bg-message-own)] text-white'
-            : 'bg-[var(--color-bg-message-other)] text-[var(--color-text-primary)]',
+            ? 'message-own'
+            : 'message-other',
           direction === 'outgoing'
             ? getBorderRadiusOutgoing(position)
             : getBorderRadiusIncoming(position)
@@ -166,34 +171,34 @@ export function Message({
 // ============================================================================
 
 function getBorderRadiusOutgoing(position: MessagePosition): string {
-  const base = 'rounded-[14px]';
+  // Organic, asymmetric border-radius for own messages
   switch (position) {
     case 'single':
-      return `${base} rounded-br-[6px]`;
+      return 'rounded-[16px] rounded-br-[4px]';
     case 'first':
-      return `${base} rounded-br-[6px]`;
+      return 'rounded-[16px] rounded-br-[4px]';
     case 'normal':
-      return 'rounded-l-[14px] rounded-r-[6px]';
+      return 'rounded-l-[16px] rounded-r-[4px]';
     case 'last':
-      return `${base} rounded-tr-[6px]`;
+      return 'rounded-[16px] rounded-tr-[4px]';
     default:
-      return base;
+      return 'rounded-[16px]';
   }
 }
 
 function getBorderRadiusIncoming(position: MessagePosition): string {
-  const base = 'rounded-[14px]';
+  // Organic, asymmetric border-radius for other messages
   switch (position) {
     case 'single':
-      return `${base} rounded-bl-[6px]`;
+      return 'rounded-[16px] rounded-bl-[4px]';
     case 'first':
-      return `${base} rounded-bl-[6px]`;
+      return 'rounded-[16px] rounded-bl-[4px]';
     case 'normal':
-      return 'rounded-r-[14px] rounded-l-[6px]';
+      return 'rounded-r-[16px] rounded-l-[4px]';
     case 'last':
-      return `${base} rounded-tl-[6px]`;
+      return 'rounded-[16px] rounded-tl-[4px]';
     default:
-      return base;
+      return 'rounded-[16px]';
   }
 }
 

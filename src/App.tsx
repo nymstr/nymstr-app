@@ -12,7 +12,27 @@ import { useAuthStore } from './stores/authStore';
 import { useChatStore } from './stores/chatStore';
 import { useAppEvents } from './hooks/useAppEvents';
 import * as api from './services/api';
-import { Loader2 } from 'lucide-react';
+
+// Cipher wheel loader component
+function CipherLoader({ size = 'lg', message }: { size?: 'md' | 'lg'; message?: string }) {
+  const sizes = {
+    md: 'w-12 h-12',
+    lg: 'w-16 h-16',
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-5">
+      <div className={`cipher-loader ${sizes[size]}`}>
+        <div className="outer" />
+        <div className="inner" />
+        <div className="center" />
+      </div>
+      {message && (
+        <p className="text-[13px] text-[var(--color-text-muted)]">{message}</p>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const status = useAuthStore((s) => s.status);
@@ -39,7 +59,6 @@ function App() {
       try {
         const result = await api.initialize();
         if (result.hasUser && result.username) {
-          // User exists, but we need them to login
           setUnauthenticated();
         } else {
           setUnauthenticated();
@@ -59,11 +78,9 @@ function App() {
 
     const loadData = async () => {
       try {
-        // Load contacts
         const contacts = await api.getContacts();
         setContacts(contacts);
 
-        // Convert contacts to conversations (for now)
         const convs = contacts.map((contact) => ({
           id: contact.username,
           type: 'direct' as const,
@@ -76,11 +93,9 @@ function App() {
         }));
         setConversations(convs);
 
-        // Also load groups
         try {
           const groups = await api.getJoinedGroups();
 
-          // Deduplicate groups by address
           const seenAddresses = new Set<string>();
           const uniqueGroups = groups.filter((group) => {
             if (seenAddresses.has(group.address)) {
@@ -101,12 +116,10 @@ function App() {
             groupAddress: group.address,
           }));
 
-          // Merge with contacts, avoiding duplicates
           const existingIds = new Set(convs.map((c) => c.id));
           const newGroupConvs = groupConvs.filter((g) => !existingIds.has(g.id));
           setConversations([...convs, ...newGroupConvs]);
         } catch (e) {
-          // Groups might not be implemented yet
           console.log('Groups not available:', e);
         }
       } catch (error) {
@@ -121,11 +134,8 @@ function App() {
   if (status === 'loading') {
     return (
       <>
-        <div className="h-screen flex items-center justify-center bg-[var(--color-bg-primary)]">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent)] mx-auto mb-4" />
-            <p className="text-[var(--color-text-secondary)]">Loading...</p>
-          </div>
+        <div className="h-screen flex items-center justify-center bg-[var(--color-bg-primary)] vignette">
+          <CipherLoader message="Initializing..." />
         </div>
         <ToastContainer />
       </>
@@ -136,13 +146,8 @@ function App() {
   if (status === 'authenticating') {
     return (
       <>
-        <div className="h-screen flex items-center justify-center bg-[var(--color-bg-primary)]">
-          <div className="text-center">
-            <Loader2 className="w-12 h-12 animate-spin text-[var(--color-accent)] mx-auto mb-4" />
-            <p className="text-[var(--color-text-secondary)]">
-              {progress?.message || 'Authenticating...'}
-            </p>
-          </div>
+        <div className="h-screen flex items-center justify-center bg-[var(--color-bg-primary)] vignette">
+          <CipherLoader message={progress?.message || 'Establishing secure channel...'} />
         </div>
         <ToastContainer />
       </>
