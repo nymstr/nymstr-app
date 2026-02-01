@@ -126,6 +126,16 @@ pub enum AppEvent {
         sender: String,
     },
 
+    // ========== Direct Message Events ==========
+
+    /// Conversation request received (someone wants to start a direct chat)
+    ConversationRequestReceived {
+        /// Username of the person requesting the conversation
+        sender: String,
+        /// When the request was received
+        timestamp: String,
+    },
+
     // ========== System Events ==========
 
     /// System notification message
@@ -274,6 +284,13 @@ impl EventEmitter {
             mls_group_id,
             sender,
         });
+    }
+
+    // ========== Direct Message Event Helpers ==========
+
+    /// Emit a conversation request received event
+    pub fn conversation_request_received(&self, sender: String, timestamp: String) {
+        self.emit(AppEvent::ConversationRequestReceived { sender, timestamp });
     }
 
     // ========== System Event Helpers ==========

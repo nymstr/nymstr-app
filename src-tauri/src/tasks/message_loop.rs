@@ -202,6 +202,13 @@ async fn handle_mls_message(
             handler.respond_to_key_package_request(sender, their_key_package).await?;
 
             tracing::info!("Sent key package response to {}", sender);
+
+            // Notify the UI that someone wants to establish a conversation
+            emitter.conversation_request_received(
+                sender.clone(),
+                incoming.ts.to_rfc3339(),
+            );
+            tracing::info!("Emitted ConversationRequestReceived event for {}", sender);
         }
 
         "keyPackageResponse" => {

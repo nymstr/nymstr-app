@@ -117,6 +117,7 @@ export type AppEvent =
   | { type: 'GroupMessagesReceived'; payload: { groupAddress: string; count: number } }
   | { type: 'WelcomeReceived'; payload: { groupId: string; sender: string } }
   | { type: 'GroupInviteReceived'; payload: { groupId: string; groupName?: string; sender: string } }
+  | { type: 'ConversationRequestReceived'; payload: { sender: string; timestamp: string } }
   | { type: 'ContactOnline'; payload: { username: string; online: boolean } }
   | { type: 'SystemNotification'; payload: { message: string } }
   | { type: 'BackgroundTasksStarted'; payload: Record<string, never> }

@@ -63,6 +63,7 @@ pub fn start_pending_poller(state: Arc<AppState>) -> JoinHandle<()> {
             let timestamp = chrono::Utc::now().timestamp();
 
             // Sign the request: "fetchPending:{username}:{timestamp}"
+            // PGP handles hashing internally - sign raw message
             let message_to_sign = format!("fetchPending:{}:{}", current_user.username, timestamp);
             let signature = match PgpSigner::sign_detached_secure(
                 &pgp_secret_key,

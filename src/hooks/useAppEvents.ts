@@ -160,6 +160,21 @@ export function useAppEvents() {
           });
         },
 
+        // Handle conversation request (someone wants to start a direct chat)
+        onConversationRequest: (sender, timestamp) => {
+          console.log(`[Event] Conversation request received from ${sender}`);
+          showToast.info('Message Request', `${sender} wants to start a conversation`);
+          // Add to invites using the same pending welcome mechanism
+          // Using a special groupId format to distinguish from group invites
+          addPendingWelcome({
+            id: Date.now(),
+            groupId: `dm:${sender}`, // Use dm: prefix to identify direct message requests
+            groupName: `Chat with ${sender}`,
+            sender,
+            receivedAt: timestamp || new Date().toISOString(),
+          });
+        },
+
         // Handle contact online status changes
         onContactStatus: (username, online) => {
           updateContactOnlineStatus(username, online);
