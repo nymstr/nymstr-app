@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Group, PendingWelcome, PendingJoinRequest } from '../types';
+import type { Group, PendingWelcome } from '../types';
 
 interface GroupStore {
   // Data
@@ -200,14 +200,14 @@ export const useGroupStore = create<GroupStore>((set) => ({
       return { userRoles: newMap };
     }),
 
-  getUserRole: (groupAddress) => {
+  getUserRole: (_groupAddress) => {
     // This is a getter, we need to access the store state
     // For zustand, getters should be defined differently
     // This will be handled in the component
     return undefined;
   },
 
-  isAdmin: (groupAddress) => {
+  isAdmin: (_groupAddress) => {
     // Same issue - this should be used in components via selector
     return false;
   },

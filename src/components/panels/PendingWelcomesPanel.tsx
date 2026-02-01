@@ -18,10 +18,21 @@ export function PendingWelcomesPanel({ isOpen, onClose }: PendingWelcomesPanelPr
   const processingWelcomes = useGroupStore((s) => s.processingWelcomes);
 
   // Fetch welcomes on mount/open
+  // Merge server welcomes with existing conversation requests (dm: prefix)
   const fetchWelcomes = useCallback(async () => {
     try {
-      const welcomes = await api.getPendingWelcomes();
-      setPendingWelcomes(welcomes);
+      const serverWelcomes = await api.getPendingWelcomes();
+      // Get current state directly to avoid dependency issues
+      const currentWelcomes = useGroupStore.getState().pendingWelcomes;
+      // Preserve conversation requests (dm: prefix) that are only in-memory
+      const conversationRequests = currentWelcomes.filter(w => w.groupId.startsWith('dm:'));
+      // Merge: server welcomes + conversation requests (avoiding duplicates by id)
+      const serverIds = new Set(serverWelcomes.map(w => w.id));
+      const mergedWelcomes = [
+        ...serverWelcomes,
+        ...conversationRequests.filter(w => !serverIds.has(w.id)),
+      ];
+      setPendingWelcomes(mergedWelcomes);
     } catch (error) {
       console.error('Failed to fetch pending welcomes:', error);
     }
@@ -105,39 +116,66 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  // Check if this is a conversation request (dm: prefix) vs a group welcome
+  const isConversationRequest = welcome.groupId.startsWith('dm:');
+
   const handleAccept = async () => {
     setError(null);
     setProcessingWelcome(welcome.id, true);
 
     try {
-      await api.processWelcome(welcome.id);
+      if (isConversationRequest) {
+        // For conversation requests, the MLS conversation is already joined
+        // when the p2pWelcome message was received. Just add to UI.
+        const contactUsername = welcome.sender;
 
-      setSuccess(true);
-      removePendingWelcome(welcome.id);
+        // Add as a direct conversation
+        addConversation({
+          id: contactUsername,
+          type: 'direct',
+          name: welcome.groupName || contactUsername,
+          unreadCount: 0,
+        });
 
-      // Add group to joined groups and conversations
-      const groupName = welcome.groupName || `Group ${welcome.groupId.substring(0, 8)}`;
-      addJoinedGroup({
-        id: welcome.groupId,
-        name: groupName,
-        address: welcome.groupId,
-        memberCount: 0,
-        isPublic: false,
-      });
+        setSuccess(true);
+        removePendingWelcome(welcome.id);
 
-      addConversation({
-        id: welcome.groupId,
-        type: 'group',
-        name: groupName,
-        unreadCount: 0,
-        groupAddress: welcome.groupId,
-      });
+        // Navigate to the conversation
+        setTimeout(() => {
+          setActiveConversation(contactUsername);
+          onAccepted();
+        }, 500);
+      } else {
+        // For group welcomes, process via the server
+        await api.processWelcome(welcome.id);
 
-      // Navigate to the group after a brief delay
-      setTimeout(() => {
-        setActiveConversation(welcome.groupId);
-        onAccepted();
-      }, 500);
+        setSuccess(true);
+        removePendingWelcome(welcome.id);
+
+        // Add group to joined groups and conversations
+        const groupName = welcome.groupName || `Group ${welcome.groupId.substring(0, 8)}`;
+        addJoinedGroup({
+          id: welcome.groupId,
+          name: groupName,
+          address: welcome.groupId,
+          memberCount: 0,
+          isPublic: false,
+        });
+
+        addConversation({
+          id: welcome.groupId,
+          type: 'group',
+          name: groupName,
+          unreadCount: 0,
+          groupAddress: welcome.groupId,
+        });
+
+        // Navigate to the group after a brief delay
+        setTimeout(() => {
+          setActiveConversation(welcome.groupId);
+          onAccepted();
+        }, 500);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to accept invite');
     } finally {
@@ -148,13 +186,13 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
   return (
     <div className="p-4 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]">
       <div className="flex items-start gap-3">
-        <Avatar fallback={welcome.groupName || welcome.groupId} />
+        <Avatar fallback={isConversationRequest ? welcome.sender : (welcome.groupName || welcome.groupId)} />
         <div className="flex-1 min-w-0">
           <h4 className="font-medium truncate">
-            {welcome.groupName || `Group ${welcome.groupId.substring(0, 8)}...`}
+            {isConversationRequest ? welcome.sender : (welcome.groupName || `Group ${welcome.groupId.substring(0, 8)}...`)}
           </h4>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            Invited by <span className="font-medium">{welcome.sender}</span>
+            {isConversationRequest ? 'Wants to start a conversation' : `Invited by ${welcome.sender}`}
           </p>
           <p className="text-xs text-[var(--color-text-muted)] mt-1">
             {formatRelativeTime(welcome.receivedAt)}
@@ -172,7 +210,9 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
       {success && (
         <div className="mt-3 p-2 rounded bg-[var(--color-success)]/10 flex items-center gap-2">
           <Check className="w-4 h-4 text-[var(--color-success)]" />
-          <p className="text-xs text-[var(--color-success)]">Joined successfully!</p>
+          <p className="text-xs text-[var(--color-success)]">
+            {isConversationRequest ? 'Conversation started!' : 'Joined successfully!'}
+          </p>
         </div>
       )}
 
@@ -186,12 +226,12 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
             {isProcessing ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Accepting...
+                {isConversationRequest ? 'Starting...' : 'Accepting...'}
               </>
             ) : (
               <>
                 <Users className="w-4 h-4 mr-2" />
-                Accept Invite
+                {isConversationRequest ? 'Start Conversation' : 'Accept Invite'}
               </>
             )}
           </Button>

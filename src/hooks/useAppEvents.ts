@@ -37,9 +37,10 @@ export function useAppEvents() {
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let isMounted = true;
 
     const setup = async () => {
-      unlisten = await onAppEvent({
+      const unlistenFn = await onAppEvent({
         // Handle incoming messages
         onMessage: (message, conversationId) => {
           // Add message to the conversation
@@ -196,11 +197,20 @@ export function useAppEvents() {
           }
         },
       });
+      // Only set unlisten if the component is still mounted
+      // This prevents StrictMode from creating duplicate listeners
+      if (isMounted) {
+        unlisten = unlistenFn;
+      } else {
+        // Component unmounted before setup completed, cleanup immediately
+        unlistenFn();
+      }
     };
 
     setup();
 
     return () => {
+      isMounted = false;
       if (unlisten) {
         unlisten();
       }
