@@ -1,53 +1,61 @@
-# nymstr-app
+# Nymstr
 
-Privacy-preserving messaging client for the [Nym mixnet](https://nymtech.net/).
-
-> **Under Active Development** - APIs may change.
+A privacy-first messaging application built on the [Nym mixnet](https://nymtech.net/).
 
 ## Features
 
-- End-to-end encryption (PGP for direct, MLS for groups)
-- Interactive TUI and scriptable CLI
-- Anonymous routing via Nym mixnet
+- **Anonymous Messaging** - All traffic routed through the Nym mixnet to prevent surveillance and traffic analysis
+- **End-to-End Encryption** - MLS (Message Layer Security, RFC 9420) for group chats with forward secrecy
+- **Cryptographic Authentication** - PGP-based identity verification
+- **Group Chat** - Encrypted group messaging with admin controls
+- **Contact Management** - Add and manage contacts securely
 
-## Quick Start
+## Architecture
+
+Nymstr is a desktop application built with:
+
+- **Frontend**: React + TypeScript + Vite
+- **Backend**: Rust + Tauri
+- **Crypto**: OpenMLS for group encryption, PGP for identity
+- **Network**: Nym SDK for mixnet communication
+- **Storage**: SQLite for local persistence
+
+## Prerequisites
+
+- [Rust](https://rustup.rs/) (1.86+)
+- [Node.js](https://nodejs.org/) (18+)
+- [pnpm](https://pnpm.io/) or npm
+
+## Development
 
 ```bash
-echo 'SERVER_ADDRESS=<discovery_server_nym_address>' >> .env
-cargo run --release
+# Install frontend dependencies
+pnpm install
+
+# Run in development mode
+pnpm tauri dev
+
+# Build for production
+pnpm tauri build
 ```
-
-## Usage
-
-### TUI Mode (default)
-```bash
-cargo run
-```
-
-### CLI Mode
-```bash
-cargo run -- register <username>
-cargo run -- login <username>
-cargo run -- send <from> <to> "message"
-cargo run -- group register <server> <username>
-cargo run -- group send <server> <username> "message"
-```
-
-### TUI Controls
-
-- `L`/`R` - Login/Register on welcome screen
-- `Tab` - Switch between sections
-- `i` - Focus input
-- `s` - Search users
-- `g` - Group search
-- `q` - Quit
 
 ## Configuration
 
-- `SERVER_ADDRESS` - Discovery server Nym address (required)
-- `NYMSTR_PGP_PASSPHRASE` - PGP passphrase (prompts if not set)
-- `RUST_LOG` - Log level (`info`, `debug`, `trace`)
+The app connects to Nymstr discovery and group servers over the Nym mixnet. On first run, you'll be prompted to:
+
+1. Create or import a PGP keypair
+2. Register a username with a discovery server
+3. Add contacts and join groups
+
+## Security Model
+
+| Layer | Protection | Technology |
+|-------|-----------|------------|
+| Transport | Network anonymity | Nym mixnet |
+| Encryption | Message confidentiality | MLS, AES-256-GCM |
+| Authentication | Identity verification | PGP signatures |
+| Key Management | Key protection at rest | PBKDF2 + AES-256-GCM |
 
 ## License
 
-GNU GPLv3.0
+GPL-3.0
