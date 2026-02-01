@@ -1,0 +1,89 @@
+[package]
+name = "nymstr-app-v2"
+version = "0.1.0"
+description = "Nymstr - Privacy-first messaging on the Nym mixnet"
+authors = ["Nymstr Team"]
+edition = "2021"
+
+[lib]
+name = "nymstr_app_v2_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Database
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+anyhow = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Nym SDK for mixnet connectivity
+nym-sdk = { git = "https://github.com/nymtech/nym", branch = "master" }
+rpassword = "7"
+
+# PGP cryptography
+pgp = "0.16"
+
+# MLS (Message Layer Security) for end-to-end encryption
+mls-rs = { version = "0.51.0", features = ["sqlite"] }
+mls-rs-core = "0.24.0"
+mls-rs-crypto-openssl = "0.18.0"
+mls-rs-provider-sqlite = "0.19.0"
+
+# Cryptographic utilities
+aes-gcm = "0.10"
+argon2 = "0.5"
+hkdf = "0.12"
+sha2 = "0.10"
+hmac = "0.12"
+rand = "0.8"
+openssl = "0.10"
+
+# Security
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = "2.5"
+
+# Serialization and encoding
+base64 = "0.21"
+hex = "0.4"
+
+# Async and concurrency
+tokio-stream = "0.1"
+
+# Logging
+log = "0.4"
+env_logger = "0.9"
+
+# Platform-specific
+libc = "0.2"
+
+[dev-dependencies]
+mockall = "0.13"
+proptest = "1.5"
+tokio-test = "0.4"
+fake = { version = "2.9", features = ["derive"] }
+pretty_assertions = "1.4"
+rstest = "0.22"
+tempfile = "3.15"
+
+[features]
+default = []
