@@ -8,7 +8,7 @@ mod screen;
 mod ui;
 
 use crate::app::App;
-use crate::cli::{Cli, run_cli};
+use crate::cli::{run_cli, Cli};
 use clap::Parser;
 use color_eyre::Result;
 // Custom logger to capture log output in TUI

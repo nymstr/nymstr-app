@@ -4,9 +4,9 @@
 
 use crate::core::{db::Db, mixnet_client::MixnetService};
 use crate::crypto::{Crypto, SecurePassphrase};
-use anyhow::{Result, anyhow};
-use log::{info, error};
-use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use anyhow::{anyhow, Result};
+use log::{error, info};
+use pgp::composed::{SignedPublicKey, SignedSecretKey};
 use std::sync::Arc;
 
 /// Type alias for Arc-wrapped PGP secret key to reduce expensive cloning
@@ -51,15 +51,24 @@ impl AuthenticationHandler {
         info!("Processing registration challenge for user: {}", username);
 
         // Sign the nonce with our PGP key
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, nonce.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
+            return Err(anyhow!(
+                "PGP secret key or passphrase not available for signing"
+            ));
         };
 
         // Send signed response back to server
-        self.service.send_registration_response(username, &signature).await?;
-        info!("Sent registration challenge response for user: {}", username);
+        self.service
+            .send_registration_response(username, &signature)
+            .await?;
+        info!(
+            "Sent registration challenge response for user: {}",
+            username
+        );
         Ok(())
     }
 
@@ -71,7 +80,10 @@ impl AuthenticationHandler {
                 Ok(true)
             }
             error_msg => {
-                error!("❌ Registration failed for user {}: {}", username, error_msg);
+                error!(
+                    "❌ Registration failed for user {}: {}",
+                    username, error_msg
+                );
                 Ok(false)
             }
         }
@@ -82,14 +94,20 @@ impl AuthenticationHandler {
         info!("Processing login challenge for user: {}", username);
 
         // Sign the nonce with our PGP key
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, nonce.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
+            return Err(anyhow!(
+                "PGP secret key or passphrase not available for signing"
+            ));
         };
 
         // Send login challenge response
-        self.service.send_login_response(username, &signature).await?;
+        self.service
+            .send_login_response(username, &signature)
+            .await?;
         info!("Sent login challenge response for user: {}", username);
         Ok(())
     }
@@ -110,7 +128,11 @@ impl AuthenticationHandler {
 
     /// Handle query response from server
     #[allow(dead_code)] // Part of public API for query handling
-    pub async fn process_query_response(&self, username: &str, public_key: &str) -> Result<(String, String)> {
+    pub async fn process_query_response(
+        &self,
+        username: &str,
+        public_key: &str,
+    ) -> Result<(String, String)> {
         info!("Received query response for user: {}", username);
 
         // Validate the public key format
@@ -142,7 +164,6 @@ impl AuthenticationHandler {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Note: These would need actual test implementations with mock services
 
     #[test]

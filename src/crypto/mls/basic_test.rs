@@ -2,9 +2,9 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::core::db::Db;
     use crate::crypto::mls::client::{MlsClient, MlsKeyManager};
     use crate::crypto::pgp::{PgpKeyManager, SecurePassphrase};
-    use crate::core::db::Db;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -46,18 +46,39 @@ mod tests {
         let username = "test_user_client";
 
         // Generate PGP keys first
-        let (pgp_secret, pgp_public) = PgpKeyManager::generate_keypair_secure(username, &passphrase)
-            .expect("Failed to generate PGP keys");
+        let (pgp_secret, pgp_public) =
+            PgpKeyManager::generate_keypair_secure(username, &passphrase)
+                .expect("Failed to generate PGP keys");
 
         // Create MLS client (should generate MLS keys)
-        let client1 = MlsClient::new(username, pgp_secret.clone(), pgp_public.clone(), db.clone(), &passphrase);
-        assert!(client1.is_ok(), "Failed to create MLS client: {:?}", client1.err());
+        let client1 = MlsClient::new(
+            username,
+            Arc::new(pgp_secret.clone()),
+            Arc::new(pgp_public.clone()),
+            db.clone(),
+            &passphrase,
+        );
+        assert!(
+            client1.is_ok(),
+            "Failed to create MLS client: {:?}",
+            client1.err()
+        );
 
         let client1 = client1.unwrap();
 
         // Create another MLS client (should reuse MLS keys)
-        let client2 = MlsClient::new(username, pgp_secret, pgp_public, db.clone(), &passphrase);
-        assert!(client2.is_ok(), "Failed to create second MLS client: {:?}", client2.err());
+        let client2 = MlsClient::new(
+            username,
+            Arc::new(pgp_secret),
+            Arc::new(pgp_public),
+            db.clone(),
+            &passphrase,
+        );
+        assert!(
+            client2.is_ok(),
+            "Failed to create second MLS client: {:?}",
+            client2.err()
+        );
 
         let client2 = client2.unwrap();
 
@@ -80,15 +101,23 @@ mod tests {
         let username = "test_user_kp_val";
 
         // Generate PGP keys
-        let (pgp_secret, pgp_public) = PgpKeyManager::generate_keypair_secure(username, &passphrase)
-            .expect("Failed to generate PGP keys");
+        let (pgp_secret, pgp_public) =
+            PgpKeyManager::generate_keypair_secure(username, &passphrase)
+                .expect("Failed to generate PGP keys");
 
         // Create MLS client
-        let client = MlsClient::new(username, pgp_secret, pgp_public, db.clone(), &passphrase)
-            .expect("Failed to create MLS client");
+        let client = MlsClient::new(
+            username,
+            Arc::new(pgp_secret),
+            Arc::new(pgp_public),
+            db.clone(),
+            &passphrase,
+        )
+        .expect("Failed to create MLS client");
 
         // Generate key package
-        let key_package_bytes = client.generate_key_package()
+        let key_package_bytes = client
+            .generate_key_package()
             .expect("Failed to generate key package");
 
         // Create key package manager and validate
@@ -100,7 +129,11 @@ mod tests {
         );
 
         let validation_result = kp_manager.validate_key_package(&key_package_b64);
-        assert!(validation_result.is_ok(), "Key package validation failed: {:?}", validation_result.err());
+        assert!(
+            validation_result.is_ok(),
+            "Key package validation failed: {:?}",
+            validation_result.err()
+        );
         assert!(validation_result.unwrap(), "Key package should be valid");
     }
 
@@ -164,9 +197,21 @@ mod tests {
         assert!(db.init_user("User_Name_123").await.is_ok());
 
         // Invalid usernames should fail
-        assert!(db.init_user("").await.is_err(), "Empty username should fail");
-        assert!(db.init_user("user-with-dash").await.is_err(), "Dash should be rejected");
-        assert!(db.init_user("user.with.dots").await.is_err(), "Dots should be rejected");
-        assert!(db.init_user("123startswithnumber").await.is_err(), "Starting with number should fail");
+        assert!(
+            db.init_user("").await.is_err(),
+            "Empty username should fail"
+        );
+        assert!(
+            db.init_user("user-with-dash").await.is_err(),
+            "Dash should be rejected"
+        );
+        assert!(
+            db.init_user("user.with.dots").await.is_err(),
+            "Dots should be rejected"
+        );
+        assert!(
+            db.init_user("123startswithnumber").await.is_err(),
+            "Starting with number should fail"
+        );
     }
 }

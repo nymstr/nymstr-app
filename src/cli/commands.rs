@@ -1,8 +1,8 @@
-use clap::{Parser, Subcommand};
-use anyhow::Result;
-use crate::core::KeyManager;
 use crate::core::message_handler::MessageHandler;
 use crate::core::mixnet_client::MixnetService;
+use crate::core::KeyManager;
+use anyhow::Result;
+use clap::{Parser, Subcommand};
 use log::info;
 
 #[derive(Parser)]
@@ -177,6 +177,12 @@ pub struct CliApp {
     handler: Option<MessageHandler>,
 }
 
+impl Default for CliApp {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CliApp {
     pub fn new() -> Self {
         Self { handler: None }
@@ -202,7 +208,9 @@ impl CliApp {
     /// Load user keys and set up user context locally (no discovery server contact).
     /// Used for group operations that don't require central authentication.
     fn load_user(&mut self, username: &str) -> Result<()> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         if handler.current_user.as_deref() == Some(username) {
@@ -219,7 +227,9 @@ impl CliApp {
     }
 
     pub async fn login(&mut self, username: &str) -> Result<bool> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Logging in user: {}", username);
@@ -246,7 +256,9 @@ impl CliApp {
     }
 
     pub async fn send_message(&mut self, from: &str, recipient: &str, message: &str) -> Result<()> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Ensure user is logged in first
@@ -258,14 +270,19 @@ impl CliApp {
             }
         }
 
-        info!("Sending message from {} to {}: {}", from, recipient, message);
+        info!(
+            "Sending message from {} to {}: {}",
+            from, recipient, message
+        );
         handler.send_direct_message(recipient, message).await?;
         info!("Message sent successfully");
         Ok(())
     }
 
     pub async fn query_user(&mut self, username: &str) -> Result<Option<(String, String)>> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Querying user: {}", username);
@@ -286,7 +303,9 @@ impl CliApp {
     }
 
     pub async fn send_handshake(&mut self, from: &str, recipient: &str) -> Result<()> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Ensure user is logged in first
@@ -305,7 +324,9 @@ impl CliApp {
     }
 
     pub async fn listen(&mut self, username: &str, duration: u64) -> Result<()> {
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Ensure user is logged in first
@@ -317,9 +338,15 @@ impl CliApp {
             }
         }
 
-        info!("Listening for messages as {}{}...",
-              username,
-              if duration > 0 { format!(" for {} seconds", duration) } else { String::new() });
+        info!(
+            "Listening for messages as {}{}...",
+            username,
+            if duration > 0 {
+                format!(" for {} seconds", duration)
+            } else {
+                String::new()
+            }
+        );
 
         let timeout = if duration > 0 {
             Some(std::time::Duration::from_secs(duration))
@@ -374,18 +401,30 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Generate MLS KeyPackage for future group membership
         info!("Generating MLS KeyPackage for user {}", user);
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        )?;
         let key_package_bytes = mls_client.generate_key_package()?;
         let key_package_b64 = base64::engine::general_purpose::STANDARD.encode(&key_package_bytes);
         info!("Generated KeyPackage ({} bytes)", key_package_bytes.len());
@@ -394,18 +433,22 @@ impl CliApp {
         let public_key_armored = Crypto::pgp_public_key_armored(&public_key)?;
         let timestamp = chrono::Utc::now().timestamp();
         let sign_content = format!("register:{}:{}:{}", user, server, timestamp);
-        let signature = Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
+        let signature =
+            Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
 
         // Send registration with KeyPackage
         info!("Registering with group server {} (with KeyPackage)", server);
-        handler.service.register_with_group_server_and_key_package(
-            user,
-            &public_key_armored,
-            &signature,
-            timestamp,
-            server,
-            Some(&key_package_b64),
-        ).await?;
+        handler
+            .service
+            .register_with_group_server_and_key_package(
+                user,
+                &public_key_armored,
+                &signature,
+                timestamp,
+                server,
+                Some(&key_package_b64),
+            )
+            .await?;
 
         // Wait for mixnet to forward the message
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
@@ -417,7 +460,9 @@ impl CliApp {
     pub async fn group_send(&mut self, server: &str, user: &str, message: &str) -> Result<()> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Sending group message to {}: {}", server, message);
@@ -434,7 +479,9 @@ impl CliApp {
     pub async fn group_stats(&mut self, server: &str, user: &str) -> Result<()> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         info!("Getting group stats from {}", server);
@@ -456,17 +503,29 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Try to get current MLS epoch for this group (if we have joined it)
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        )?;
 
         // Look up the actual MLS group ID from the database
         let mls_group_id = handler.db.get_mls_group_id_by_server(user, server).await?;
@@ -474,73 +533,84 @@ impl CliApp {
         // Only attempt epoch sync if we have an MLS group state
         if let Some(ref group_id) = mls_group_id {
             if let Ok(local_epoch) = mls_client.get_group_epoch(group_id) {
-            info!("Local MLS epoch for group: {}", local_epoch);
+                info!("Local MLS epoch for group: {}", local_epoch);
 
-            // Request epoch sync to catch up on any missed commits
-            // Server expects signature over "groupId:epoch" where groupId is the MLS group ID
-            let sign_content = format!("{}:{}", group_id, local_epoch);
-            let sync_sig = Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
+                // Request epoch sync to catch up on any missed commits
+                // Server expects signature over "groupId:epoch" where groupId is the MLS group ID
+                let sign_content = format!("{}:{}", group_id, local_epoch);
+                let sync_sig = Crypto::pgp_sign_detached_secure(
+                    &secret_key,
+                    sign_content.as_bytes(),
+                    &passphrase,
+                )?;
 
-            info!("Requesting epoch sync from server (since epoch {})", local_epoch);
-            if let Err(e) = handler.service.sync_epoch_from_server(user, group_id, local_epoch as i64, &sync_sig, server).await {
-                info!("Epoch sync request failed (non-fatal): {}", e);
-            }
+                info!(
+                    "Requesting epoch sync from server (since epoch {})",
+                    local_epoch
+                );
+                if let Err(e) = handler
+                    .service
+                    .sync_epoch_from_server(user, group_id, local_epoch as i64, &sync_sig, server)
+                    .await
+                {
+                    info!("Epoch sync request failed (non-fatal): {}", e);
+                }
 
-            // Brief wait for sync response (non-blocking, best effort)
-            let sync_timeout = std::time::Duration::from_secs(5);
-            let sync_start = std::time::Instant::now();
+                // Brief wait for sync response (non-blocking, best effort)
+                let sync_timeout = std::time::Duration::from_secs(5);
+                let sync_start = std::time::Instant::now();
 
-            while sync_start.elapsed() < sync_timeout {
-                tokio::select! {
-                    incoming = handler.incoming_rx.recv() => {
-                        if let Some(incoming) = incoming {
-                            if incoming.envelope.action == "syncEpochResponse" {
-                                info!("Received epoch sync response");
-                                // Process the sync response (commits would be processed here)
-                                // For now, just log it - commit processing would require extending MlsClient
-                                if let Some(content) = incoming.envelope.payload.get("content").and_then(|v| v.as_str()) {
-                                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
-                                        if let Some(current_epoch) = parsed.get("currentEpoch").and_then(|v| v.as_i64()) {
-                                            info!("Server current epoch: {}", current_epoch);
-                                        }
-                                        if let Some(commits) = parsed.get("commits").and_then(|v| v.as_array()) {
-                                            info!("Received {} buffered commits for catch-up", commits.len());
-                                            // Process each commit to advance our epoch
-                                            for commit_obj in commits {
-                                                if let (Some(epoch), Some(commit_b64)) = (
-                                                    commit_obj.get("epoch").and_then(|v| v.as_i64()),
-                                                    commit_obj.get("commit").and_then(|v| v.as_str())
-                                                ) {
-                                                    info!("Processing commit for epoch {}", epoch);
-                                                    match base64::engine::general_purpose::STANDARD.decode(commit_b64) {
-                                                        Ok(commit_bytes) => {
-                                                            match mls_client.process_commit(group_id, &commit_bytes) {
-                                                                Ok(new_epoch) => {
-                                                                    info!("Advanced to epoch {} after processing commit", new_epoch);
-                                                                }
-                                                                Err(e) => {
-                                                                    info!("Failed to process commit for epoch {}: {}", epoch, e);
+                while sync_start.elapsed() < sync_timeout {
+                    tokio::select! {
+                        incoming = handler.incoming_rx.recv() => {
+                            if let Some(incoming) = incoming {
+                                if incoming.envelope.action == "syncEpochResponse" {
+                                    info!("Received epoch sync response");
+                                    // Process the sync response (commits would be processed here)
+                                    // For now, just log it - commit processing would require extending MlsClient
+                                    if let Some(content) = incoming.envelope.payload.get("content").and_then(|v| v.as_str()) {
+                                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(content) {
+                                            if let Some(current_epoch) = parsed.get("currentEpoch").and_then(|v| v.as_i64()) {
+                                                info!("Server current epoch: {}", current_epoch);
+                                            }
+                                            if let Some(commits) = parsed.get("commits").and_then(|v| v.as_array()) {
+                                                info!("Received {} buffered commits for catch-up", commits.len());
+                                                // Process each commit to advance our epoch
+                                                for commit_obj in commits {
+                                                    if let (Some(epoch), Some(commit_b64)) = (
+                                                        commit_obj.get("epoch").and_then(|v| v.as_i64()),
+                                                        commit_obj.get("commit").and_then(|v| v.as_str())
+                                                    ) {
+                                                        info!("Processing commit for epoch {}", epoch);
+                                                        match base64::engine::general_purpose::STANDARD.decode(commit_b64) {
+                                                            Ok(commit_bytes) => {
+                                                                match mls_client.process_commit(group_id, &commit_bytes) {
+                                                                    Ok(new_epoch) => {
+                                                                        info!("Advanced to epoch {} after processing commit", new_epoch);
+                                                                    }
+                                                                    Err(e) => {
+                                                                        info!("Failed to process commit for epoch {}: {}", epoch, e);
+                                                                    }
                                                                 }
                                                             }
-                                                        }
-                                                        Err(e) => {
-                                                            info!("Failed to decode commit: {}", e);
+                                                            Err(e) => {
+                                                                info!("Failed to decode commit: {}", e);
+                                                            }
                                                         }
                                                     }
                                                 }
                                             }
                                         }
                                     }
+                                    break;
+                                } else {
+                                    handler.process_received_message(incoming).await;
                                 }
-                                break;
-                            } else {
-                                handler.process_received_message(incoming).await;
                             }
                         }
+                        _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
                     }
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
                 }
-            }
             } else {
                 info!("No local MLS group state found for this server - skipping epoch sync");
             }
@@ -593,11 +663,17 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
@@ -607,45 +683,57 @@ impl CliApp {
         let group_id = server.to_string();
 
         // Create MLS client and group
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        )?;
         let group_info = mls_client.create_mls_group(&group_id).await?;
 
         // Store group server association with the actual MLS group ID
         // The mls_group_id is the internally-generated ID used by MLS for group lookup
-        handler.db.store_group_server(user, &group_id, server, user, Some(&group_info.mls_group_id)).await?;
+        handler
+            .db
+            .store_group_server(
+                user,
+                &group_id,
+                server,
+                user,
+                Some(&group_info.mls_group_id),
+            )
+            .await?;
 
         // Store group membership using the actual MLS group ID as conversation_id
         // This ensures decryption can find the group by the same ID used by MLS
-        handler.db.add_group_membership(
-            user,
-            &group_info.mls_group_id,
-            user,
-            None,
-            true,
-            "admin",
-        ).await?;
+        handler
+            .db
+            .add_group_membership(user, &group_info.mls_group_id, user, None, true, "admin")
+            .await?;
 
         // Register with the group server using timestamp-based authentication
         // Sign: "register:{username}:{server_address}:{unix_timestamp}"
         let timestamp = chrono::Utc::now().timestamp();
         let sign_content = format!("register:{}:{}:{}", user, server, timestamp);
         let public_key_armored = Crypto::pgp_public_key_armored(&public_key)?;
-        let signature = Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
+        let signature =
+            Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
 
-        handler.service.register_with_group_server(
-            user,
-            &public_key_armored,
-            &signature,
-            timestamp,
-            server
-        ).await?;
+        handler
+            .service
+            .register_with_group_server(user, &public_key_armored, &signature, timestamp, server)
+            .await?;
 
         // Wait for mixnet to forward the message before disconnecting
         // The mixnet has latency due to multiple hops, so we need to keep the client alive
         info!("Waiting for mixnet to forward registration message...");
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-        info!("Initialized MLS group for server {} as admin {} and sent registration", server, user);
+        info!(
+            "Initialized MLS group for server {} as admin {} and sent registration",
+            server, user
+        );
         Ok(group_id)
     }
 
@@ -655,18 +743,29 @@ impl CliApp {
     /// 2. Receives the user's KeyPackage in response
     /// 3. Adds them to the local MLS group (generates Welcome)
     /// 4. Stores the Welcome on the server for the user to fetch
-    pub async fn group_approve(&mut self, server: &str, user: &str, username_to_approve: &str) -> Result<()> {
+    pub async fn group_approve(
+        &mut self,
+        server: &str,
+        user: &str,
+        username_to_approve: &str,
+    ) -> Result<()> {
         use crate::crypto::mls::MlsClient;
         use crate::crypto::Crypto;
         use base64::Engine;
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
@@ -678,13 +777,14 @@ impl CliApp {
             &passphrase,
         )?;
 
-        info!("Sending approval request for {} to server {}", username_to_approve, server);
-        handler.service.approve_group_member(
-            user,
-            username_to_approve,
-            &signature,
-            server
-        ).await?;
+        info!(
+            "Sending approval request for {} to server {}",
+            username_to_approve, server
+        );
+        handler
+            .service
+            .approve_group_member(user, username_to_approve, &signature, server)
+            .await?;
 
         // Wait for approveGroupResponse containing the user's KeyPackage
         let timeout = std::time::Duration::from_secs(30);
@@ -797,22 +897,32 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Sign the fetch request
         let sign_content = format!("fetchWelcome:{}", user);
-        let signature = Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
+        let signature =
+            Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)?;
 
         // Request Welcome from server
         info!("Fetching Welcome message from server {}", server);
-        handler.service.fetch_welcome_from_server(user, Some(server), &signature, server).await?;
+        handler
+            .service
+            .fetch_welcome_from_server(user, Some(server), &signature, server)
+            .await?;
 
         // Wait for fetchWelcomeResponse
         let timeout = std::time::Duration::from_secs(30);
@@ -901,31 +1011,54 @@ impl CliApp {
     /// Interactive group chat mode
     pub async fn group_chat_interactive(&mut self, server: &str, user: &str) -> Result<()> {
         use crate::crypto::mls::MlsClient;
-        use std::io::{self, Write, BufRead};
+        use std::io::{self, BufRead, Write};
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Check if we're a member of this group
-        let mls_group_id = handler.db.get_mls_group_id_by_server(user, server).await?
-            .ok_or_else(|| anyhow::anyhow!("Not a member of group at {}. Run 'group join' first.", server))?;
+        let mls_group_id = handler
+            .db
+            .get_mls_group_id_by_server(user, server)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Not a member of group at {}. Run 'group join' first.",
+                    server
+                )
+            })?;
 
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        )?;
         let current_epoch = mls_client.get_group_epoch(&mls_group_id).unwrap_or(0);
 
         println!("\n╔══════════════════════════════════════════════════════════════╗");
         println!("║           NYMSTR GROUP CHAT - Interactive Mode               ║");
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║  User: {:<54} ║", user);
-        println!("║  Group: {:<53} ║", &server[..std::cmp::min(53, server.len())]);
+        println!(
+            "║  Group: {:<53} ║",
+            &server[..std::cmp::min(53, server.len())]
+        );
         println!("║  Epoch: {:<53} ║", current_epoch);
         println!("╠══════════════════════════════════════════════════════════════╣");
         println!("║  Commands:                                                   ║");
@@ -987,7 +1120,14 @@ impl CliApp {
                         self.do_epoch_sync(server, user).await;
                         // Show new epoch
                         let handler = self.handler.as_ref().unwrap();
-                        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase).ok();
+                        let mls_client = MlsClient::new(
+                            user,
+                            secret_key.clone(),
+                            public_key.clone(),
+                            handler.db.clone(),
+                            &passphrase,
+                        )
+                        .ok();
                         if let Some(client) = mls_client {
                             if let Ok(epoch) = client.get_group_epoch(&mls_group_id) {
                                 println!("  Current epoch: {}", epoch);
@@ -996,7 +1136,14 @@ impl CliApp {
                     }
                     "/epoch" => {
                         let handler = self.handler.as_ref().unwrap();
-                        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase).ok();
+                        let mls_client = MlsClient::new(
+                            user,
+                            secret_key.clone(),
+                            public_key.clone(),
+                            handler.db.clone(),
+                            &passphrase,
+                        )
+                        .ok();
                         if let Some(client) = mls_client {
                             match client.get_group_epoch(&mls_group_id) {
                                 Ok(epoch) => println!("  Current epoch: {}", epoch),
@@ -1039,7 +1186,11 @@ impl CliApp {
             None => return,
         };
 
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return,
         };
@@ -1049,7 +1200,13 @@ impl CliApp {
             _ => return,
         };
 
-        let mls_client = match MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase) {
+        let mls_client = match MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        ) {
             Ok(c) => c,
             Err(_) => return,
         };
@@ -1058,12 +1215,21 @@ impl CliApp {
 
         // Sign and send sync request
         let sign_content = format!("{}:{}", mls_group_id, local_epoch);
-        let sync_sig = match Crypto::pgp_sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase) {
+        let sync_sig = match Crypto::pgp_sign_detached_secure(
+            &secret_key,
+            sign_content.as_bytes(),
+            &passphrase,
+        ) {
             Ok(s) => s,
             Err(_) => return,
         };
 
-        if handler.service.sync_epoch_from_server(user, &mls_group_id, local_epoch as i64, &sync_sig, server).await.is_err() {
+        if handler
+            .service
+            .sync_epoch_from_server(user, &mls_group_id, local_epoch as i64, &sync_sig, server)
+            .await
+            .is_err()
+        {
             return;
         }
 
@@ -1106,8 +1272,14 @@ impl CliApp {
     }
 
     /// Helper: fetch messages
-    async fn do_fetch_messages(&mut self, server: &str, _user: &str) -> Result<Vec<(String, String)>> {
-        let handler = self.handler.as_mut()
+    async fn do_fetch_messages(
+        &mut self,
+        server: &str,
+        _user: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
 
         handler.fetch_group_messages(server).await?;
@@ -1142,30 +1314,52 @@ impl CliApp {
         use crate::crypto::Crypto;
         use base64::Engine;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected"))?;
 
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
-        let mls_group_id = handler.db.get_mls_group_id_by_server(user, server).await?
+        let mls_group_id = handler
+            .db
+            .get_mls_group_id_by_server(user, server)
+            .await?
             .ok_or_else(|| anyhow::anyhow!("Not a member of this group"))?;
 
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key.clone(), handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key.clone(),
+            handler.db.clone(),
+            &passphrase,
+        )?;
 
         // Decode the group ID for MLS encryption
         let group_id_bytes = base64::engine::general_purpose::STANDARD.decode(&mls_group_id)?;
 
         // Encrypt message with MLS
-        let encrypted = mls_client.encrypt_message(&group_id_bytes, message.as_bytes()).await?;
-        let mls_ciphertext = base64::engine::general_purpose::STANDARD.encode(&encrypted.mls_message);
+        let encrypted = mls_client
+            .encrypt_message(&group_id_bytes, message.as_bytes())
+            .await?;
+        let mls_ciphertext =
+            base64::engine::general_purpose::STANDARD.encode(&encrypted.mls_message);
 
         // Sign and send - server expects signature over just ciphertext
-        let signature = Crypto::pgp_sign_detached_secure(&secret_key, mls_ciphertext.as_bytes(), &passphrase)?;
+        let signature =
+            Crypto::pgp_sign_detached_secure(&secret_key, mls_ciphertext.as_bytes(), &passphrase)?;
 
-        handler.service.send_group_message(user, &mls_ciphertext, &signature, server).await?;
+        handler
+            .service
+            .send_group_message(user, &mls_ciphertext, &signature, server)
+            .await?;
 
         // Wait briefly for confirmation
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -1174,10 +1368,17 @@ impl CliApp {
     }
 
     /// Invite a user to join a group
-    pub async fn group_invite(&mut self, group_id: &str, user: &str, recipient: &str) -> Result<()> {
+    pub async fn group_invite(
+        &mut self,
+        group_id: &str,
+        user: &str,
+        recipient: &str,
+    ) -> Result<()> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get required keys
@@ -1194,17 +1395,25 @@ impl CliApp {
         )?;
 
         // Send the invite
-        handler.service.send_group_invite(user, recipient, group_id, Some(group_id), &signature).await?;
+        handler
+            .service
+            .send_group_invite(user, recipient, group_id, Some(group_id), &signature)
+            .await?;
 
         info!("Sent group invite to {} for group {}", recipient, group_id);
         Ok(())
     }
 
     /// List pending group invites
-    pub async fn group_list_invites(&mut self, user: &str) -> Result<Vec<(i64, String, Option<String>, String, String)>> {
+    pub async fn group_list_invites(
+        &mut self,
+        user: &str,
+    ) -> Result<Vec<(i64, String, Option<String>, String, String)>> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         let invites = handler.db.get_pending_invites(user).await?;
@@ -1218,24 +1427,38 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get the invite details
         let invites = handler.db.get_pending_invites(user).await?;
-        let invite = invites.iter().find(|(id, _, _, _, _)| *id == invite_id)
+        let invite = invites
+            .iter()
+            .find(|(id, _, _, _, _)| *id == invite_id)
             .ok_or_else(|| anyhow::anyhow!("Invite not found"))?;
 
         let (_id, group_id, _group_name, sender, _received_at) = invite;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Create MLS client and generate KeyPackage
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key, handler.db.clone(), &passphrase)?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key,
+            handler.db.clone(),
+            &passphrase,
+        )?;
         let key_package_bytes = mls_client.generate_key_package()?;
         let key_package_b64 = base64::engine::general_purpose::STANDARD.encode(&key_package_bytes);
 
@@ -1247,12 +1470,21 @@ impl CliApp {
         )?;
 
         // Send join request with our KeyPackage
-        handler.service.send_group_join_request(user, group_id, &key_package_b64, &signature).await?;
+        handler
+            .service
+            .send_group_join_request(user, group_id, &key_package_b64, &signature)
+            .await?;
 
         // Mark invite as accepted
-        handler.db.update_invite_status(user, invite_id, "accepted").await?;
+        handler
+            .db
+            .update_invite_status(user, invite_id, "accepted")
+            .await?;
 
-        info!("Accepted invite {} and sent join request to {} for group {}", invite_id, sender, group_id);
+        info!(
+            "Accepted invite {} and sent join request to {} for group {}",
+            invite_id, sender, group_id
+        );
         Ok(())
     }
 
@@ -1260,7 +1492,9 @@ impl CliApp {
     pub async fn group_list_groups(&mut self, user: &str) -> Result<Vec<String>> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         let groups = handler.db.get_user_groups(user).await?;
@@ -1268,15 +1502,23 @@ impl CliApp {
     }
 
     /// List pending join requests
-    pub async fn group_list_join_requests(&mut self, user: &str, group_id: Option<&str>) -> Result<Vec<(i64, String, String, String, String)>> {
+    pub async fn group_list_join_requests(
+        &mut self,
+        user: &str,
+        group_id: Option<&str>,
+    ) -> Result<Vec<(i64, String, String, String, String)>> {
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         let requests = if let Some(gid) = group_id {
             let reqs = handler.db.get_pending_join_requests(user, gid).await?;
-            reqs.into_iter().map(|(id, req, kp, ts)| (id, gid.to_string(), req, kp, ts)).collect()
+            reqs.into_iter()
+                .map(|(id, req, kp, ts)| (id, gid.to_string(), req, kp, ts))
+                .collect()
         } else {
             handler.db.get_all_pending_join_requests(user).await?
         };
@@ -1291,28 +1533,45 @@ impl CliApp {
 
         self.load_user(user)?;
 
-        let handler = self.handler.as_mut()
+        let handler = self
+            .handler
+            .as_mut()
             .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
 
         // Get all pending requests to find the one we want
         let requests = handler.db.get_all_pending_join_requests(user).await?;
-        let request = requests.iter().find(|(id, _, _, _, _)| *id == request_id)
+        let request = requests
+            .iter()
+            .find(|(id, _, _, _, _)| *id == request_id)
             .ok_or_else(|| anyhow::anyhow!("Join request not found"))?;
 
         let (_id, group_id, requester, key_package_b64, _requested_at) = request;
 
         // Get required keys
-        let (secret_key, public_key, passphrase) = match (&handler.pgp_secret_key, &handler.pgp_public_key, &handler.pgp_passphrase) {
+        let (secret_key, public_key, passphrase) = match (
+            &handler.pgp_secret_key,
+            &handler.pgp_public_key,
+            &handler.pgp_passphrase,
+        ) {
             (Some(sk), Some(pk), Some(pp)) => (sk.clone(), pk.clone(), pp.clone()),
             _ => return Err(anyhow::anyhow!("PGP keys not available")),
         };
 
         // Decode KeyPackage
-        let key_package_bytes = base64::engine::general_purpose::STANDARD.decode(key_package_b64)?;
+        let key_package_bytes =
+            base64::engine::general_purpose::STANDARD.decode(key_package_b64)?;
 
         // Create MLS client and add member
-        let mls_client = MlsClient::new(user, secret_key.clone(), public_key, handler.db.clone(), &passphrase)?;
-        let add_result = mls_client.add_member_to_group(group_id, &key_package_bytes).await?;
+        let mls_client = MlsClient::new(
+            user,
+            secret_key.clone(),
+            public_key,
+            handler.db.clone(),
+            &passphrase,
+        )?;
+        let add_result = mls_client
+            .add_member_to_group(group_id, &key_package_bytes)
+            .await?;
 
         // Sign and send Welcome
         let signature = crate::crypto::Crypto::pgp_sign_detached_secure(
@@ -1321,13 +1580,25 @@ impl CliApp {
             &passphrase,
         )?;
 
-        handler.service.send_mls_welcome(user, requester, &add_result.welcome, &signature).await?;
+        handler
+            .service
+            .send_mls_welcome(user, requester, &add_result.welcome, &signature)
+            .await?;
 
         // Update request status and add membership
-        handler.db.update_join_request_status(user, request_id, "approved").await?;
-        handler.db.add_group_membership(user, group_id, requester, None, true, "member").await?;
+        handler
+            .db
+            .update_join_request_status(user, request_id, "approved")
+            .await?;
+        handler
+            .db
+            .add_group_membership(user, group_id, requester, None, true, "member")
+            .await?;
 
-        info!("Approved join request {} from {} for group {}", request_id, requester, group_id);
+        info!(
+            "Approved join request {} from {} for group {}",
+            request_id, requester, group_id
+        );
         Ok(())
     }
 }
@@ -1340,7 +1611,9 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
     match cli.command {
         Commands::Register { username } => {
-            let handler = app.handler.as_mut()
+            let handler = app
+                .handler
+                .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("Not connected to mixnet"))?;
             handler.register_user(&username).await?;
         }
@@ -1349,7 +1622,11 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             app.login(&username).await?;
         }
 
-        Commands::Send { from, recipient, message } => {
+        Commands::Send {
+            from,
+            recipient,
+            message,
+        } => {
             app.send_message(&from, &recipient, &message).await?;
             // Wait for message to be transmitted through mixnet before shutting down
             tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
@@ -1367,85 +1644,112 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
             app.send_handshake(&from, &recipient).await?;
         }
 
-        Commands::Group { action } => {
-            match action {
-                GroupCommands::Register { server, user } => {
-                    app.group_register(&server, &user).await?;
-                }
-                GroupCommands::Send { server, user, message } => {
-                    app.group_send(&server, &user, &message).await?;
-                }
-                GroupCommands::Fetch { server, user } => {
-                    app.group_fetch(&server, &user).await?;
-                }
-                GroupCommands::Stats { server, user } => {
-                    app.group_stats(&server, &user).await?;
-                }
-                GroupCommands::Init { server, user } => {
-                    let group_id = app.group_init(&server, &user).await?;
-                    println!("Initialized MLS group for server {} as admin {}", server, user);
-                    println!("Group ID: {}", group_id);
-                }
-                GroupCommands::Approve { server, user, username_to_approve } => {
-                    app.group_approve(&server, &user, &username_to_approve).await?;
-                    println!("Approved {} for group server {}", username_to_approve, server);
-                }
-                GroupCommands::Invite { group_id, user, recipient } => {
-                    app.group_invite(&group_id, &user, &recipient).await?;
-                    println!("Sent invite to {} for group {}", recipient, group_id);
-                }
-                GroupCommands::ListInvites { user } => {
-                    let invites = app.group_list_invites(&user).await?;
-                    if invites.is_empty() {
-                        println!("No pending invites");
-                    } else {
-                        println!("Pending invites:");
-                        for (id, group_id, group_name, sender, received_at) in invites {
-                            println!("  [{}] From: {}, Group: {} ({}), Received: {}",
-                                id, sender, group_name.as_deref().unwrap_or("unnamed"), group_id, received_at);
-                        }
+        Commands::Group { action } => match action {
+            GroupCommands::Register { server, user } => {
+                app.group_register(&server, &user).await?;
+            }
+            GroupCommands::Send {
+                server,
+                user,
+                message,
+            } => {
+                app.group_send(&server, &user, &message).await?;
+            }
+            GroupCommands::Fetch { server, user } => {
+                app.group_fetch(&server, &user).await?;
+            }
+            GroupCommands::Stats { server, user } => {
+                app.group_stats(&server, &user).await?;
+            }
+            GroupCommands::Init { server, user } => {
+                let group_id = app.group_init(&server, &user).await?;
+                println!(
+                    "Initialized MLS group for server {} as admin {}",
+                    server, user
+                );
+                println!("Group ID: {}", group_id);
+            }
+            GroupCommands::Approve {
+                server,
+                user,
+                username_to_approve,
+            } => {
+                app.group_approve(&server, &user, &username_to_approve)
+                    .await?;
+                println!(
+                    "Approved {} for group server {}",
+                    username_to_approve, server
+                );
+            }
+            GroupCommands::Invite {
+                group_id,
+                user,
+                recipient,
+            } => {
+                app.group_invite(&group_id, &user, &recipient).await?;
+                println!("Sent invite to {} for group {}", recipient, group_id);
+            }
+            GroupCommands::ListInvites { user } => {
+                let invites = app.group_list_invites(&user).await?;
+                if invites.is_empty() {
+                    println!("No pending invites");
+                } else {
+                    println!("Pending invites:");
+                    for (id, group_id, group_name, sender, received_at) in invites {
+                        println!(
+                            "  [{}] From: {}, Group: {} ({}), Received: {}",
+                            id,
+                            sender,
+                            group_name.as_deref().unwrap_or("unnamed"),
+                            group_id,
+                            received_at
+                        );
                     }
-                }
-                GroupCommands::AcceptInvite { user, invite_id } => {
-                    app.group_accept_invite(&user, invite_id).await?;
-                    println!("Accepted invite {} and sent join request", invite_id);
-                }
-                GroupCommands::ListGroups { user } => {
-                    let groups = app.group_list_groups(&user).await?;
-                    if groups.is_empty() {
-                        println!("Not a member of any groups");
-                    } else {
-                        println!("Your groups:");
-                        for group_id in groups {
-                            println!("  {}", group_id);
-                        }
-                    }
-                }
-                GroupCommands::ListJoinRequests { user, group_id } => {
-                    let requests = app.group_list_join_requests(&user, group_id.as_deref()).await?;
-                    if requests.is_empty() {
-                        println!("No pending join requests");
-                    } else {
-                        println!("Pending join requests:");
-                        for (id, gid, requester, _, requested_at) in requests {
-                            println!("  [{}] From: {}, Group: {}, Requested: {}",
-                                id, requester, gid, requested_at);
-                        }
-                    }
-                }
-                GroupCommands::ApproveJoinRequest { user, request_id } => {
-                    app.group_approve_join_request(&user, request_id).await?;
-                    println!("Approved join request {} and sent Welcome", request_id);
-                }
-                GroupCommands::Join { server, user } => {
-                    app.group_join(&server, &user).await?;
-                    println!("Successfully joined group at server {}", server);
-                }
-                GroupCommands::Chat { server, user } => {
-                    app.group_chat_interactive(&server, &user).await?;
                 }
             }
-        }
+            GroupCommands::AcceptInvite { user, invite_id } => {
+                app.group_accept_invite(&user, invite_id).await?;
+                println!("Accepted invite {} and sent join request", invite_id);
+            }
+            GroupCommands::ListGroups { user } => {
+                let groups = app.group_list_groups(&user).await?;
+                if groups.is_empty() {
+                    println!("Not a member of any groups");
+                } else {
+                    println!("Your groups:");
+                    for group_id in groups {
+                        println!("  {}", group_id);
+                    }
+                }
+            }
+            GroupCommands::ListJoinRequests { user, group_id } => {
+                let requests = app
+                    .group_list_join_requests(&user, group_id.as_deref())
+                    .await?;
+                if requests.is_empty() {
+                    println!("No pending join requests");
+                } else {
+                    println!("Pending join requests:");
+                    for (id, gid, requester, _, requested_at) in requests {
+                        println!(
+                            "  [{}] From: {}, Group: {}, Requested: {}",
+                            id, requester, gid, requested_at
+                        );
+                    }
+                }
+            }
+            GroupCommands::ApproveJoinRequest { user, request_id } => {
+                app.group_approve_join_request(&user, request_id).await?;
+                println!("Approved join request {} and sent Welcome", request_id);
+            }
+            GroupCommands::Join { server, user } => {
+                app.group_join(&server, &user).await?;
+                println!("Successfully joined group at server {}", server);
+            }
+            GroupCommands::Chat { server, user } => {
+                app.group_chat_interactive(&server, &user).await?;
+            }
+        },
     }
 
     Ok(())

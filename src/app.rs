@@ -1,5 +1,5 @@
-use crate::core::KeyManager;
 use crate::core::message_handler::MessageHandler;
+use crate::core::KeyManager;
 use crate::event::handle_key_event;
 use crate::log_buffer::LOG_BUFFER;
 use crate::model::contact::Contact;
@@ -7,7 +7,7 @@ use crate::model::message::Message;
 use crate::model::user::User;
 use crate::screen::ScreenState;
 use crossterm::event::{self, Event as CEvent, KeyCode};
-use log::{info, error};
+use log::{error, info};
 use ratatui::layout::Rect;
 use ratatui::{DefaultTerminal, Frame};
 use std::collections::HashMap;
@@ -53,6 +53,7 @@ pub struct App {
     search_loading: bool,
     search_spinner_idx: usize,
     // handle for in-flight search query (returns handler and query result)
+    #[allow(clippy::type_complexity)]
     search_handle:
         Option<tokio::task::JoinHandle<(MessageHandler, anyhow::Result<Option<(String, String)>>)>>,
     /// Group search mode buffer & result
@@ -79,6 +80,12 @@ pub struct App {
     splash_step: usize,              // current glow step (0..max)
     splash_rising: bool,             // glow direction
     spinner_idx: usize,              // spinner animation index
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl App {
@@ -160,7 +167,7 @@ impl App {
         let page = if let Some(filename) = map.get(&key) {
             let path = format!("{}/{}", font_dir, filename);
             match std::process::Command::new("figlet")
-                .args(&["-f", &path, "nymstr"])
+                .args(["-f", &path, "nymstr"])
                 .output()
             {
                 Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(),
@@ -313,11 +320,13 @@ impl App {
                         // set group search result
                         match res {
                             Ok(success) if success => {
-                                self.group_search_result = Some("Authenticated with group".to_string());
+                                self.group_search_result =
+                                    Some("Authenticated with group".to_string());
                                 self.group_authenticated = true;
                             }
                             Ok(_) => {
-                                self.group_search_result = Some("Authentication failed".to_string());
+                                self.group_search_result =
+                                    Some("Authentication failed".to_string());
                             }
                             Err(_) => {
                                 self.group_search_result = Some("Connection failed".to_string());
@@ -337,7 +346,10 @@ impl App {
                     let msgs = handler.process_received_message(incoming_msg).await;
                     for (from, text) in msgs {
                         // Check if this is a group message by looking at the message format
-                        if text.starts_with("Group:") || self.phase == Phase::GroupView || self.phase == Phase::GroupInput {
+                        if text.starts_with("Group:")
+                            || self.phase == Phase::GroupView
+                            || self.phase == Phase::GroupInput
+                        {
                             // Add to group messages
                             self.group_messages.push(format!("{}: {}", from, text));
                         } else if self.phase == Phase::Chat {
@@ -350,7 +362,10 @@ impl App {
                                         chat.messages.push(Vec::new());
                                         // Save new contact to database
                                         if let Some(current_user) = &self.logged_in_user {
-                                            let _ = handler.db.add_contact(&current_user.username, &from, "").await;
+                                            let _ = handler
+                                                .db
+                                                .add_contact(&current_user.username, &from, "")
+                                                .await;
                                         }
                                         chat.contacts.len() - 1
                                     }
@@ -475,7 +490,10 @@ impl App {
                                     if let Err(e) = &keys_result {
                                         error!("Failed to load PGP keys: {}", e);
                                         if let Ok(mut logs) = LOG_BUFFER.lock() {
-                                            logs.push(format!("Key error: {}. Set NYMSTR_PGP_PASSPHRASE env var.", e));
+                                            logs.push(format!(
+                                                "Key error: {}. Set NYMSTR_PGP_PASSPHRASE env var.",
+                                                e
+                                            ));
                                         }
                                         self.handler = Some(handler);
                                         self.phase = Phase::Login;
@@ -509,9 +527,14 @@ impl App {
                                                 self.input_buffer.clear();
                                                 self.phase = Phase::Chat;
                                                 // Load chat history after successful login
-                                                if let Err(e) = self.load_chat_history_to_screen().await {
+                                                if let Err(e) =
+                                                    self.load_chat_history_to_screen().await
+                                                {
                                                     if let Ok(mut logs) = LOG_BUFFER.lock() {
-                                                        logs.push(format!("Failed to load chat history: {:?}", e));
+                                                        logs.push(format!(
+                                                            "Failed to load chat history: {:?}",
+                                                            e
+                                                        ));
                                                     }
                                                 }
                                             } else {
@@ -662,9 +685,7 @@ impl App {
                         Phase::GroupSearch => {
                             match key.code {
                                 // --- MENU COMMANDS (only when authenticated) ---
-                                KeyCode::Char('1')
-                                    if self.group_authenticated =>
-                                {
+                                KeyCode::Char('1') if self.group_authenticated => {
                                     // View group messages
                                     self.phase = Phase::GroupView;
                                 }
@@ -688,19 +709,22 @@ impl App {
 
                                 // --- REGULAR TYPING (only when no result & not loading) ---
                                 KeyCode::Char(c)
-                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                    if !self.group_search_loading
+                                        && self.group_search_result.is_none() =>
                                 {
                                     self.group_search_buffer.push(c);
                                 }
                                 KeyCode::Backspace
-                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                    if !self.group_search_loading
+                                        && self.group_search_result.is_none() =>
                                 {
                                     self.group_search_buffer.pop();
                                 }
 
                                 // --- START GROUP SEARCH (only when no result & not loading) ---
                                 KeyCode::Enter
-                                    if !self.group_search_loading && self.group_search_result.is_none() =>
+                                    if !self.group_search_loading
+                                        && self.group_search_result.is_none() =>
                                 {
                                     // Start group authentication
                                     if let Some(mut handler) = self.handler.take() {
@@ -710,14 +734,17 @@ impl App {
                                             // Store the server address for later use
                                             self.group_server_address = server_addr.clone();
                                             let h = tokio::spawn(async move {
-                                                let res = handler.authenticate_group(&username, &server_addr).await;
+                                                let res = handler
+                                                    .authenticate_group(&username, &server_addr)
+                                                    .await;
                                                 (handler, res)
                                             });
                                             self.group_search_handle = Some(h);
                                             self.group_search_loading = true;
                                             self.group_search_spinner_idx = 0;
                                         } else {
-                                            self.group_search_result = Some("Please login first".to_string());
+                                            self.group_search_result =
+                                                Some("Please login first".to_string());
                                         }
                                     }
                                 }
@@ -733,7 +760,8 @@ impl App {
                                     if let Some(handler) = self.handler.take() {
                                         let group_addr = self.group_server_address.clone();
                                         let h = tokio::spawn(async move {
-                                            let res = handler.service.get_group_stats(&group_addr).await;
+                                            let res =
+                                                handler.service.get_group_stats(&group_addr).await;
                                             // Convert () to bool for consistency
                                             (handler, res.map(|_| true))
                                         });
@@ -768,15 +796,22 @@ impl App {
                                             let message_display = message.clone();
                                             let group_addr = self.group_server_address.clone();
                                             let h = tokio::spawn(async move {
-                                                let res = handler.send_group_message(&message, &group_addr).await;
+                                                let res = handler
+                                                    .send_group_message(&message, &group_addr)
+                                                    .await;
                                                 // Convert () to bool for consistency
                                                 (handler, res.map(|_| true))
                                             });
                                             self.group_search_handle = Some(h);
                                             self.group_search_loading = true;
                                             // Add message to local display immediately
-                                            let user = self.logged_in_user.as_ref().map(|u| u.username.as_str()).unwrap_or("You");
-                                            self.group_messages.push(format!("{}: {}", user, message_display));
+                                            let user = self
+                                                .logged_in_user
+                                                .as_ref()
+                                                .map(|u| u.username.as_str())
+                                                .unwrap_or("You");
+                                            self.group_messages
+                                                .push(format!("{}: {}", user, message_display));
                                             self.group_input_buffer.clear();
                                         }
                                     }
@@ -865,7 +900,8 @@ impl App {
         let block = Block::default().borders(Borders::ALL).title("Mixnet Logs");
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        let logs = LOG_BUFFER.lock()
+        let logs = LOG_BUFFER
+            .lock()
             .expect("LOG_BUFFER lock poisoned in draw_log_pane");
         let lines: Vec<Line> = logs.iter().map(|l| Line::from(l.as_str())).collect();
         let paragraph = Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false });
@@ -873,7 +909,7 @@ impl App {
     }
 
     fn draw_splash(&self, frame: &mut Frame) {
-        use crate::ui::widgets::splash;
+        use crate::ui::widgets::splash::{self, SplashConfig};
 
         let splash_text = &self.splash_pages[self.splash_idx];
         // only spin once the user has pressed a key (i.e. in Connecting phase)
@@ -885,47 +921,44 @@ impl App {
             _ => "",
         };
 
-        splash::render_splash(
-            frame,
-            frame.area(),
+        let config = SplashConfig {
             splash_text,
-            self.splash_step,
-            true,         // still glow dynamically
-            show_spinner, // only bounce once Connecting
-            self.spinner_idx,
+            glow_step: self.splash_step,
+            glow_dynamic: true, // still glow dynamically
+            show_spinner,       // only bounce once Connecting
+            spinner_idx: self.spinner_idx,
             label,
-        );
+        };
+        splash::render_splash(frame, frame.area(), &config);
     }
 
     // Registration and login animated status screens
     fn draw_registration_status(&self, frame: &mut Frame, area: Rect, username: &str) {
-        use crate::ui::widgets::splash;
+        use crate::ui::widgets::splash::{self, SplashConfig};
         let label = format!("Registering {}", username);
-        splash::render_splash(
-            frame,
-            area,
-            &self.splash_pages[self.splash_idx],
-            20,
-            false,
-            true,
-            self.spinner_idx,
-            &label,
-        );
+        let config = SplashConfig {
+            splash_text: &self.splash_pages[self.splash_idx],
+            glow_step: 20,
+            glow_dynamic: false,
+            show_spinner: true,
+            spinner_idx: self.spinner_idx,
+            label: &label,
+        };
+        splash::render_splash(frame, area, &config);
     }
 
     fn draw_login_status(&self, frame: &mut Frame, area: Rect, username: &str) {
-        use crate::ui::widgets::splash;
+        use crate::ui::widgets::splash::{self, SplashConfig};
         let label = format!("Logging in as {}", username);
-        splash::render_splash(
-            frame,
-            area,
-            &self.splash_pages[self.splash_idx],
-            20,
-            false,
-            true,
-            self.spinner_idx,
-            &label,
-        );
+        let config = SplashConfig {
+            splash_text: &self.splash_pages[self.splash_idx],
+            glow_step: 20,
+            glow_dynamic: false,
+            show_spinner: true,
+            spinner_idx: self.spinner_idx,
+            label: &label,
+        };
+        splash::render_splash(frame, area, &config);
     }
 
     // Bouncing-ball logic moved to ui/widgets/splash.rs
@@ -1098,7 +1131,8 @@ impl App {
         let inner = block.inner(area);
         frame.render_widget(block, area);
         // collect last N log lines based on inner area height and scroll offset
-        let logs = buffer.lock()
+        let logs = buffer
+            .lock()
             .expect("log buffer lock poisoned in draw_log_panel");
         let total = logs.len();
         let height = inner.height as usize;
@@ -1137,7 +1171,11 @@ impl App {
 
         // 1) Group server address input
         let input = Paragraph::new(self.group_search_buffer.as_str())
-            .block(Block::default().borders(Borders::ALL).title("Group Server Address"))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Group Server Address"),
+            )
             .alignment(Alignment::Left);
         frame.render_widget(input, chunks[0]);
 
@@ -1164,7 +1202,8 @@ impl App {
                     let menu = Paragraph::new(opts).alignment(Alignment::Center);
                     frame.render_widget(menu, chunks[2]);
                 } else if res != "Connection failed" && res != "Please login first" {
-                    let menu = Paragraph::new("[2] Search Again    [3] Home").alignment(Alignment::Center);
+                    let menu =
+                        Paragraph::new("[2] Search Again    [3] Home").alignment(Alignment::Center);
                     frame.render_widget(menu, chunks[2]);
                 }
             }
@@ -1182,7 +1221,7 @@ impl App {
         let block = Block::default().title(title).borders(Borders::ALL);
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        
+
         // Split into message area and instructions
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -1191,17 +1230,22 @@ impl App {
 
         // Show group messages
         if self.group_messages.is_empty() {
-            let empty_msg = Paragraph::new("No messages yet. Messages are delivered automatically via push.")
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::Gray));
+            let empty_msg =
+                Paragraph::new("No messages yet. Messages are delivered automatically via push.")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(Color::Gray));
             frame.render_widget(empty_msg, chunks[0]);
         } else {
-            let items: Vec<ListItem> = self.group_messages
+            let items: Vec<ListItem> = self
+                .group_messages
                 .iter()
                 .map(|msg| ListItem::new(Line::from(msg.as_str())))
                 .collect();
-            let list = List::new(items)
-                .block(Block::default().borders(Borders::ALL).title("Group Messages"));
+            let list = List::new(items).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Group Messages"),
+            );
             frame.render_widget(list, chunks[0]);
         }
 
@@ -1223,15 +1267,18 @@ impl App {
         let block = Block::default().title(title).borders(Borders::ALL);
         let inner = block.inner(area);
         frame.render_widget(block, area);
-        
+
         // Split into message area, input area, and instructions
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0), 
-                Constraint::Length(3), 
-                Constraint::Length(1)
-            ].as_ref())
+            .constraints(
+                [
+                    Constraint::Min(0),
+                    Constraint::Length(3),
+                    Constraint::Length(1),
+                ]
+                .as_ref(),
+            )
             .split(inner);
 
         // Show group messages (recent ones)
@@ -1242,15 +1289,19 @@ impl App {
             frame.render_widget(empty_msg, chunks[0]);
         } else {
             // Show last 10 messages
-            let recent_messages: Vec<ListItem> = self.group_messages
+            let recent_messages: Vec<ListItem> = self
+                .group_messages
                 .iter()
                 .rev()
                 .take(10)
                 .rev()
                 .map(|msg| ListItem::new(Line::from(msg.as_str())))
                 .collect();
-            let list = List::new(recent_messages)
-                .block(Block::default().borders(Borders::ALL).title("Recent Messages"));
+            let list = List::new(recent_messages).block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Recent Messages"),
+            );
             frame.render_widget(list, chunks[0]);
         }
 
@@ -1272,51 +1323,52 @@ impl App {
         if let Some(handler) = &self.handler {
             if let Some(current_user) = &handler.current_user {
                 match handler.db.load_chat_history(current_user).await {
-                Ok(chat_history) => {
-                    if let Some(chat) = self.screen.as_chat_mut() {
-                        // Clear existing data
-                        chat.contacts.clear();
-                        chat.messages.clear();
+                    Ok(chat_history) => {
+                        if let Some(chat) = self.screen.as_chat_mut() {
+                            // Clear existing data
+                            chat.contacts.clear();
+                            chat.messages.clear();
 
-                        // Load contacts and messages from database
-                        for (contact_name, messages) in chat_history {
-                            // Add contact
-                            chat.contacts.push(Contact::new(&contact_name));
+                            // Load contacts and messages from database
+                            for (contact_name, messages) in chat_history {
+                                // Add contact
+                                chat.contacts.push(Contact::new(&contact_name));
 
-                            // Convert database messages to TUI Message format
-                            let mut contact_messages = Vec::new();
-                            for (sent, content, timestamp) in messages {
-                                let sender = if sent {
-                                    // Message sent by current user - use their username
-                                    self.logged_in_user.as_ref()
-                                        .map(|u| u.username.as_str())
-                                        .unwrap_or("You")
-                                } else {
-                                    // Message received from contact
-                                    &contact_name
-                                };
-                                contact_messages.push(Message {
-                                    sender: sender.to_string(),
-                                    content,
-                                    timestamp,
-                                });
+                                // Convert database messages to TUI Message format
+                                let mut contact_messages = Vec::new();
+                                for (sent, content, timestamp) in messages {
+                                    let sender = if sent {
+                                        // Message sent by current user - use their username
+                                        self.logged_in_user
+                                            .as_ref()
+                                            .map(|u| u.username.as_str())
+                                            .unwrap_or("You")
+                                    } else {
+                                        // Message received from contact
+                                        &contact_name
+                                    };
+                                    contact_messages.push(Message {
+                                        sender: sender.to_string(),
+                                        content,
+                                        timestamp,
+                                    });
+                                }
+                                chat.messages.push(contact_messages);
                             }
-                            chat.messages.push(contact_messages);
-                        }
 
-                        // Update UI state if we have contacts
-                        if !chat.contacts.is_empty() {
-                            chat.highlighted_contact = 0;
-                            chat.contacts_state.select(Some(0));
-                        }
+                            // Update UI state if we have contacts
+                            if !chat.contacts.is_empty() {
+                                chat.highlighted_contact = 0;
+                                chat.contacts_state.select(Some(0));
+                            }
 
-                        info!("Loaded {} contacts with chat history", chat.contacts.len());
+                            info!("Loaded {} contacts with chat history", chat.contacts.len());
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to load chat history: {}", e);
                     }
                 }
-                Err(e) => {
-                    log::error!("Failed to load chat history: {}", e);
-                }
-            }
             }
         }
         Ok(())

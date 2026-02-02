@@ -2,7 +2,7 @@
 //!
 //! This module contains methods for managing contacts.
 
-use super::{Db, sanitize_table_name};
+use super::{sanitize_table_name, Db};
 use anyhow::Result;
 use sqlx::Row;
 

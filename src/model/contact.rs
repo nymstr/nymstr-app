@@ -35,10 +35,10 @@ mod tests {
         assert_eq!(contact.id, "bob");
         assert_eq!(contact.display_name, "bob");
         assert!(contact.online);
-        
+
         contact.display_name = "Bob Smith".to_string();
         contact.online = false;
-        
+
         assert_eq!(contact.id, "bob");
         assert_eq!(contact.display_name, "Bob Smith");
         assert!(!contact.online);
@@ -48,7 +48,7 @@ mod tests {
     fn test_contact_clone() {
         let contact1 = Contact::new("charlie");
         let contact2 = contact1.clone();
-        
+
         assert_eq!(contact1, contact2);
         assert_eq!(contact1.id, contact2.id);
         assert_eq!(contact1.display_name, contact2.display_name);
@@ -60,7 +60,7 @@ mod tests {
         let contact1 = Contact::new("dave");
         let contact2 = Contact::new("dave");
         let contact3 = Contact::new("eve");
-        
+
         assert_eq!(contact1, contact2);
         assert_ne!(contact1, contact3);
     }
@@ -105,10 +105,10 @@ mod tests {
             display_name: "Original Name".to_string(),
             online: true,
         };
-        
+
         contact.display_name = "Modified Name".to_string();
         contact.online = false;
-        
+
         assert_eq!(contact.id, "id1");
         assert_eq!(contact.display_name, "Modified Name");
         assert!(!contact.online);
@@ -121,19 +121,19 @@ mod tests {
             display_name: "Test User".to_string(),
             online: true,
         };
-        
+
         let contact2 = Contact {
             id: "test".to_string(),
             display_name: "Test User".to_string(),
             online: true,
         };
-        
+
         let contact3 = Contact {
             id: "test".to_string(),
             display_name: "Test User".to_string(),
             online: false,
         };
-        
+
         assert_eq!(contact1, contact2);
         assert_ne!(contact1, contact3);
     }

@@ -36,7 +36,7 @@ mod tests {
         let mut message = Message::new("bob", "Initial message");
         assert_eq!(message.sender, "bob");
         assert_eq!(message.content, "Initial message");
-        
+
         message.content = "Updated message".to_string();
         assert_eq!(message.content, "Updated message");
         assert_eq!(message.sender, "bob");
@@ -46,7 +46,7 @@ mod tests {
     fn test_message_clone() {
         let message1 = Message::new("charlie", "Test message");
         let message2 = message1.clone();
-        
+
         assert_eq!(message1, message2);
         assert_eq!(message1.sender, message2.sender);
         assert_eq!(message1.content, message2.content);
@@ -71,7 +71,7 @@ mod tests {
             content: "Different content".to_string(),
             timestamp,
         };
-        
+
         assert_eq!(message1, message2);
         assert_ne!(message1, message3);
     }
@@ -129,7 +129,7 @@ mod tests {
         let message1 = Message::new("user1", "First message");
         std::thread::sleep(std::time::Duration::from_millis(1));
         let message2 = Message::new("user2", "Second message");
-        
+
         assert!(message1.timestamp < message2.timestamp);
     }
 
@@ -140,10 +140,10 @@ mod tests {
             content: "original_content".to_string(),
             timestamp: Utc::now(),
         };
-        
+
         message.sender = "modified_sender".to_string();
         message.content = "modified_content".to_string();
-        
+
         assert_eq!(message.sender, "modified_sender");
         assert_eq!(message.content, "modified_content");
     }
@@ -156,19 +156,19 @@ mod tests {
             content: "content".to_string(),
             timestamp,
         };
-        
+
         let message2 = Message {
             sender: "test".to_string(),
             content: "content".to_string(),
             timestamp,
         };
-        
+
         let message3 = Message {
             sender: "test".to_string(),
             content: "different".to_string(),
             timestamp,
         };
-        
+
         assert_eq!(message1, message2);
         assert_ne!(message1, message3);
     }

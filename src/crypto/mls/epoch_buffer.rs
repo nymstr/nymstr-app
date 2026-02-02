@@ -8,7 +8,7 @@
 #![allow(dead_code)] // Methods are part of the public API for epoch buffering
 
 use crate::core::db::{Db, PendingMlsMessage};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use log::{debug, info, warn};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -68,7 +68,8 @@ impl EpochAwareBuffer {
     /// Get the current username
     async fn get_username(&self) -> Result<String> {
         let user = self.username.lock().await;
-        user.clone().ok_or_else(|| anyhow!("Username not set in epoch buffer"))
+        user.clone()
+            .ok_or_else(|| anyhow!("Username not set in epoch buffer"))
     }
 
     /// Queue a message that couldn't be processed due to epoch mismatch
@@ -95,7 +96,9 @@ impl EpochAwareBuffer {
         };
 
         let mut buffer = self.memory_buffer.lock().await;
-        let queue = buffer.entry(conv_id.to_string()).or_insert_with(VecDeque::new);
+        let queue = buffer
+            .entry(conv_id.to_string())
+            .or_insert_with(VecDeque::new);
 
         // Enforce memory limit - overflow to DB only
         if queue.len() >= MAX_BUFFER_SIZE {
@@ -219,7 +222,12 @@ impl EpochAwareBuffer {
     }
 
     /// Mark a message as failed after exceeding retry limit
-    pub async fn mark_failed(&self, conv_id: &str, mls_message_b64: &str, error: &str) -> Result<()> {
+    pub async fn mark_failed(
+        &self,
+        conv_id: &str,
+        mls_message_b64: &str,
+        error: &str,
+    ) -> Result<()> {
         let username = self.get_username().await?;
 
         // Remove from memory buffer
@@ -234,7 +242,9 @@ impl EpochAwareBuffer {
         let db_pending = self.db.get_pending_messages(&username, conv_id).await?;
         for msg in db_pending {
             if msg.mls_message_b64 == mls_message_b64 {
-                self.db.mark_message_failed(&username, msg.id, error).await?;
+                self.db
+                    .mark_message_failed(&username, msg.id, error)
+                    .await?;
                 warn!("Marked message {} as failed: {}", msg.id, error);
                 break;
             }
@@ -380,7 +390,10 @@ impl EpochAwareBuffer {
         let username = self.get_username().await?;
 
         // Clean DB
-        let deleted = self.db.cleanup_expired_messages(&username, max_age_secs).await?;
+        let deleted = self
+            .db
+            .cleanup_expired_messages(&username, max_age_secs)
+            .await?;
 
         // Clean memory buffer
         let cutoff = chrono::Utc::now() - chrono::Duration::seconds(max_age_secs);

@@ -1,10 +1,10 @@
 use crate::app::App;
 use ratatui::{
-    Frame,
     layout::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 pub fn render_footer(_app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {

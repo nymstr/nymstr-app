@@ -2,7 +2,7 @@
 //!
 //! This module contains methods for sending direct (P2P) encrypted messages.
 
-use super::{MessageHandler, normalize_conversation_id};
+use super::{normalize_conversation_id, MessageHandler};
 use crate::crypto::{Crypto, EncryptedMessage, MlsMessageType};
 use anyhow::anyhow;
 use chrono::Utc;
@@ -27,7 +27,10 @@ impl MessageHandler {
 
         if !conversation_exists {
             // Need to establish MLS group first
-            log::info!("No existing conversation with {}, initiating MLS handshake", recipient);
+            log::info!(
+                "No existing conversation with {}, initiating MLS handshake",
+                recipient
+            );
             self.establish_mls_conversation(recipient).await?;
         }
 
@@ -40,7 +43,12 @@ impl MessageHandler {
         // Note: client was already created above for the existence check
         let mut group = match client.load_group(group_id) {
             Ok(group) => group,
-            Err(_) => return Err(anyhow!("No MLS group found for conversation {}", conversation_id)),
+            Err(_) => {
+                return Err(anyhow!(
+                    "No MLS group found for conversation {}",
+                    conversation_id
+                ))
+            }
         };
 
         // Wrap plaintext in type/message JSON
@@ -48,7 +56,8 @@ impl MessageHandler {
         let wrapped_str = wrapped.to_string();
 
         // Encrypt message using MLS group
-        let mls_message = group.encrypt_application_message(wrapped_str.as_bytes(), Default::default())?;
+        let mls_message =
+            group.encrypt_application_message(wrapped_str.as_bytes(), Default::default())?;
 
         // Convert to EncryptedMessage format expected by service
         let encrypted_message = EncryptedMessage {
@@ -58,10 +67,14 @@ impl MessageHandler {
         };
 
         // Sign the message content for authentication (PGP signature)
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, message_content.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
+            return Err(anyhow!(
+                "PGP secret key or passphrase not available for signing"
+            ));
         };
 
         // Send MLS encrypted message using unified format

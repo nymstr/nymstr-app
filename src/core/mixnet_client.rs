@@ -1,8 +1,8 @@
 //! Mixnet service: wraps nym-sdk client, crypto, and persistence
 #![allow(dead_code)]
 use crate::core::{db::Db, messages::MixnetMessage};
-use crate::crypto::Crypto;
 use crate::crypto::mls::types::MlsWelcome;
+use crate::crypto::Crypto;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use log::info;
@@ -12,7 +12,7 @@ use nym_sdk::mixnet::{
 };
 use serde_json;
 use std::{collections::HashMap, env, sync::Arc};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{mpsc, Mutex};
 use tokio_stream::StreamExt;
 
 /// Incoming envelope from mixnet (server or peer)
@@ -79,7 +79,11 @@ impl MixnetService {
                             log::info!("Parsed message text: {}", text);
 
                             if let Ok(env) = serde_json::from_str::<MixnetMessage>(&text) {
-                                log::info!("Successfully parsed message - type: '{}', action: '{}'", env.message_type, env.action);
+                                log::info!(
+                                    "Successfully parsed message - type: '{}', action: '{}'",
+                                    env.message_type,
+                                    env.action
+                                );
 
                                 let incoming = Incoming {
                                     envelope: env,
@@ -102,8 +106,6 @@ impl MixnetService {
         Ok((service, rx))
     }
 
-    /// Register a new user: generate keys, send registration envelope
-
     /// Login existing user: load keys, send login envelope
     pub async fn login(&self, username: &str) -> Result<()> {
         // build login envelope
@@ -122,14 +124,15 @@ impl MixnetService {
     /// Query for a user's public key via the server
     pub async fn query_user(&self, username: &str) -> Result<Option<(String, String)>> {
         // lookup in local DB
-        Ok(self.db.get_user(username).await?)
+        self.db.get_user(username).await
     }
 
     /// Send a message via the central server with content and signature
     pub async fn send_message(&self, _to: &str, content: &str, signature: &str) -> Result<()> {
         // Build the envelope exactly as in the Python client
         let current_user = std::env::var("USER").unwrap_or_else(|_| "client".to_string());
-        let envelope = MixnetMessage::send(&current_user, _to, content, "conversation_id", signature);
+        let envelope =
+            MixnetMessage::send(&current_user, _to, content, "conversation_id", signature);
         let payload = envelope.to_json()?;
         let raw_bytes = payload.into_bytes();
 
@@ -153,7 +156,8 @@ impl MixnetService {
     ) -> Result<()> {
         // Build the direct message envelope as expected by receiving clients
         let current_user = std::env::var("USER").unwrap_or_else(|_| "client".to_string());
-        let env = MixnetMessage::direct_message(&current_user, to, content, "conversation_id", signature);
+        let env =
+            MixnetMessage::direct_message(&current_user, to, content, "conversation_id", signature);
         let payload = env.to_json()?;
         let raw_bytes = payload.into_bytes();
         // Determine recipient: direct address if known, else central server
@@ -278,7 +282,13 @@ impl MixnetService {
         timestamp: i64,
         group_server_address: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::register_with_group_server(username, public_key, signature, timestamp, group_server_address);
+        let env = MixnetMessage::register_with_group_server(
+            username,
+            public_key,
+            signature,
+            timestamp,
+            group_server_address,
+        );
         let payload = env.to_json()?;
         log::info!("Registering with group server {}", group_server_address);
         let raw_bytes = payload.into_bytes();
@@ -300,7 +310,11 @@ impl MixnetService {
     ) -> Result<()> {
         let env = MixnetMessage::approve_group_member(admin, username_to_approve, signature);
         let payload = env.to_json()?;
-        log::info!("Approving group member {} on server {}", username_to_approve, group_server_address);
+        log::info!(
+            "Approving group member {} on server {}",
+            username_to_approve,
+            group_server_address
+        );
         let raw_bytes = payload.into_bytes();
         let recipient: Recipient = group_server_address.parse()?;
         self.sender
@@ -333,7 +347,9 @@ impl MixnetService {
     /// Get fanout queue statistics from group server
     pub async fn get_group_stats(&self, _group_server_address: &str) -> Result<()> {
         // This functionality needs to be redesigned for the unified format
-        Err(anyhow::anyhow!("get_stats not yet implemented in unified format"))
+        Err(anyhow::anyhow!(
+            "get_stats not yet implemented in unified format"
+        ))
     }
 
     /// Send a message via the discovery server for routing
@@ -388,7 +404,8 @@ impl MixnetService {
         sender_key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::key_package_request(sender, recipient, sender_key_package, signature);
+        let env =
+            MixnetMessage::key_package_request(sender, recipient, sender_key_package, signature);
         let payload = env.to_json()?;
         log::info!("Sending key package request to {} via server", recipient);
         let raw_bytes = payload.into_bytes();
@@ -410,7 +427,13 @@ impl MixnetService {
         recipient_key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::key_package_response(sender, recipient, sender_key_package, recipient_key_package, signature);
+        let env = MixnetMessage::key_package_response(
+            sender,
+            recipient,
+            sender_key_package,
+            recipient_key_package,
+            signature,
+        );
         let payload = env.to_json()?;
         log::info!("Sending key package response to {} via server", recipient);
         let raw_bytes = payload.into_bytes();
@@ -432,7 +455,8 @@ impl MixnetService {
         group_id: &str,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::group_welcome(sender, recipient, welcome_message, group_id, signature);
+        let env =
+            MixnetMessage::group_welcome(sender, recipient, welcome_message, group_id, signature);
         let payload = env.to_json()?;
         log::info!("Sending group welcome to {} via server", recipient);
         let raw_bytes = payload.into_bytes();
@@ -454,7 +478,8 @@ impl MixnetService {
         success: bool,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::group_join_response(sender, recipient, group_id, success, signature);
+        let env =
+            MixnetMessage::group_join_response(sender, recipient, group_id, success, signature);
         let payload = env.to_json()?;
         log::info!("Sending group join response to {} via server", recipient);
         let raw_bytes = payload.into_bytes();
@@ -494,7 +519,8 @@ impl MixnetService {
         let payload = env.to_json()?;
         log::info!(
             "Sending MLS welcome for group {} to {} via server",
-            welcome.group_id, recipient
+            welcome.group_id,
+            recipient
         );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
@@ -504,7 +530,8 @@ impl MixnetService {
             .await?;
         log::info!(
             "MLS welcome for group {} sent to {} successfully",
-            welcome.group_id, recipient
+            welcome.group_id,
+            recipient
         );
         Ok(())
     }
@@ -528,7 +555,10 @@ impl MixnetService {
     ) -> Result<()> {
         let env = MixnetMessage::group_join_request(sender, group_id, key_package, signature);
         let payload = env.to_json()?;
-        log::info!("Sending group join request for group {} via server", group_id);
+        log::info!(
+            "Sending group join request for group {} via server",
+            group_id
+        );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
         let recipient: Recipient = server_addr.parse()?;
@@ -557,7 +587,11 @@ impl MixnetService {
     ) -> Result<()> {
         let env = MixnetMessage::welcome_ack(sender, recipient, group_id, success, signature);
         let payload = env.to_json()?;
-        log::info!("Sending welcome ack for group {} to {} via server", group_id, recipient);
+        log::info!(
+            "Sending welcome ack for group {} to {} via server",
+            group_id,
+            recipient
+        );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
         let recipient_addr: Recipient = server_addr.parse()?;
@@ -586,7 +620,11 @@ impl MixnetService {
     ) -> Result<()> {
         let env = MixnetMessage::group_invite(sender, recipient, group_id, group_name, signature);
         let payload = env.to_json()?;
-        log::info!("Sending group invite for {} to {} via server", group_id, recipient);
+        log::info!(
+            "Sending group invite for {} to {} via server",
+            group_id,
+            recipient
+        );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
         let recipient_addr: Recipient = server_addr.parse()?;
@@ -613,7 +651,11 @@ impl MixnetService {
     ) -> Result<()> {
         let env = MixnetMessage::key_package_for_group(sender, recipient, group_id, signature);
         let payload = env.to_json()?;
-        log::info!("Requesting KeyPackage from {} for group {} via server", recipient, group_id);
+        log::info!(
+            "Requesting KeyPackage from {} for group {} via server",
+            recipient,
+            group_id
+        );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
         let recipient_addr: Recipient = server_addr.parse()?;
@@ -640,9 +682,19 @@ impl MixnetService {
         key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::key_package_for_group_response(sender, recipient, group_id, key_package, signature);
+        let env = MixnetMessage::key_package_for_group_response(
+            sender,
+            recipient,
+            group_id,
+            key_package,
+            signature,
+        );
         let payload = env.to_json()?;
-        log::info!("Sending KeyPackage response to {} for group {} via server", recipient, group_id);
+        log::info!(
+            "Sending KeyPackage response to {} for group {} via server",
+            recipient,
+            group_id
+        );
         let raw_bytes = payload.into_bytes();
         let server_addr = env::var("SERVER_ADDRESS").context("SERVER_ADDRESS must be set")?;
         let recipient_addr: Recipient = server_addr.parse()?;
@@ -714,11 +766,14 @@ impl MixnetService {
         signature: &str,
         group_server_address: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::store_welcome(sender, group_id, target_username, welcome, signature);
+        let env =
+            MixnetMessage::store_welcome(sender, group_id, target_username, welcome, signature);
         let payload = env.to_json()?;
         log::info!(
             "Storing Welcome for {} in group {} on server {}",
-            target_username, group_id, group_server_address
+            target_username,
+            group_id,
+            group_server_address
         );
         let raw_bytes = payload.into_bytes();
         let recipient: Recipient = group_server_address.parse()?;
@@ -754,7 +809,9 @@ impl MixnetService {
         let payload = env.to_json()?;
         log::info!(
             "Buffering commit for group {} at epoch {} on server {}",
-            group_id, epoch, group_server_address
+            group_id,
+            epoch,
+            group_server_address
         );
         let raw_bytes = payload.into_bytes();
         let recipient: Recipient = group_server_address.parse()?;
@@ -783,7 +840,9 @@ impl MixnetService {
         let payload = env.to_json()?;
         log::info!(
             "Fetching Welcomes for {} from server {} (group filter: {:?})",
-            username, group_server_address, group_id
+            username,
+            group_server_address,
+            group_id
         );
         let raw_bytes = payload.into_bytes();
         let recipient: Recipient = group_server_address.parse()?;
@@ -814,7 +873,9 @@ impl MixnetService {
         let payload = env.to_json()?;
         log::info!(
             "Requesting epoch sync for group {} since epoch {} from server {}",
-            group_id, since_epoch, group_server_address
+            group_id,
+            since_epoch,
+            group_server_address
         );
         let raw_bytes = payload.into_bytes();
         let recipient: Recipient = group_server_address.parse()?;
@@ -848,7 +909,7 @@ impl Clone for MixnetService {
 // #[cfg(test)]
 // mod tests {
 //     use super::*;
-// 
+//
 //     #[test]
 //     fn test_incoming_struct_creation() {
 //         let msg = MixnetMessage::query("test_user");
@@ -856,140 +917,140 @@ impl Clone for MixnetService {
 //             envelope: msg,
 //             ts: Utc::now(),
 //         };
-//         
+//
 //         assert_eq!(incoming.envelope.action, "query");
 //         assert_eq!(incoming.envelope.username, Some("test_user".to_string()));
 //     }
-// 
+//
 //     #[test]
 //     fn test_crypto_struct_instantiation() {
 //         let crypto = Crypto;
 //         assert!(matches!(crypto, Crypto));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_message_envelope_json_serialization() {
 //         let env = MixnetMessage::register("test_user", "test_public_key");
 //         let json = env.to_json().unwrap();
 //         let raw_bytes = json.into_bytes();
-//         
+//
 //         assert!(!raw_bytes.is_empty());
-//         
+//
 //         let restored = String::from_utf8(raw_bytes).unwrap();
 //         assert!(restored.contains("\"action\":\"register\""));
 //         assert!(restored.contains("\"username\":\"test_user\""));
 //         assert!(restored.contains("\"publicKey\":\"test_public_key\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_login_envelope_creation() {
 //         let env = MixnetMessage::login("test_user");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"login\""));
 //         assert!(json.contains("\"username\":\"test_user\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_query_envelope_creation() {
 //         let env = MixnetMessage::query("target_user");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"query\""));
 //         assert!(json.contains("\"username\":\"target_user\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_send_message_envelope_creation() {
 //         let env = MixnetMessage::send("test_content", "test_signature");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"send\""));
 //         assert!(json.contains("\"content\":\"test_content\""));
 //         assert!(json.contains("\"signature\":\"test_signature\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_direct_message_envelope_creation() {
 //         let env = MixnetMessage::direct_message("direct_content", "direct_signature");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"incomingMessage\""));
 //         assert!(json.contains("\"content\":\"direct_content\""));
 //         assert!(json.contains("\"context\":\"chat\""));
 //         assert!(json.contains("\"signature\":\"direct_signature\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_group_message_envelope_creation() {
 //         let env = MixnetMessage::send_group("encrypted_group_content");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"sendGroup\""));
 //         assert!(json.contains("\"ciphertext\":\"encrypted_group_content\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_registration_response_envelope_creation() {
 //         let env = MixnetMessage::registration_response("user", "reg_sig");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"registrationResponse\""));
 //         assert!(json.contains("\"username\":\"user\""));
 //         assert!(json.contains("\"signature\":\"reg_sig\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_login_response_envelope_creation() {
 //         let env = MixnetMessage::login_response("user", "login_sig");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"loginResponse\""));
 //         assert!(json.contains("\"username\":\"user\""));
 //         assert!(json.contains("\"signature\":\"login_sig\""));
 //     }
-// 
-// 
+//
+//
 //     #[tokio::test]
 //     async fn test_connect_group_envelope_creation() {
 //         let env = MixnetMessage::connect_group("group_user", "group_sig");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"connect\""));
 //         assert!(json.contains("\"username\":\"group_user\""));
 //         assert!(json.contains("\"signature\":\"group_sig\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_register_group_envelope_creation() {
 //         let env = MixnetMessage::register_group("reg_user", "reg_pk", "reg_sig");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"register\""));
 //         assert!(json.contains("\"username\":\"reg_user\""));
 //         assert!(json.contains("\"publicKey\":\"reg_pk\""));
 //         assert!(json.contains("\"signature\":\"reg_sig\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_envelope_deserialization() {
 //         let json = r#"{"action":"query","username":"test_user"}"#;
 //         let envelope: MixnetMessage = serde_json::from_str(json).unwrap();
-//         
+//
 //         assert_eq!(envelope.action, "query");
 //         assert_eq!(envelope.username, Some("test_user".to_string()));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_incoming_message_parsing() {
 //         let json = r#"{"action":"incomingMessage","context":"chat","content":"hello"}"#;
 //         let envelope: MixnetMessage = serde_json::from_str(json).unwrap();
-//         
+//
 //         assert_eq!(envelope.action, "incomingMessage");
 //         assert_eq!(envelope.context, Some("chat".to_string()));
 //         assert_eq!(envelope.content, Some("hello".to_string()));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_environment_variable_parsing() {
 //         // Test that environment variable parsing would work
@@ -997,84 +1058,84 @@ impl Clone for MixnetService {
 //         unsafe {
 //             std::env::set_var("TEST_SERVER_ADDRESS", test_addr);
 //         }
-//         
+//
 //         let addr = std::env::var("TEST_SERVER_ADDRESS").unwrap();
 //         assert_eq!(addr, test_addr);
-//         
+//
 //         // Clean up
 //         unsafe {
 //             std::env::remove_var("TEST_SERVER_ADDRESS");
 //         }
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_message_byte_conversion() {
 //         let env = MixnetMessage::send("test message", "test sig");
 //         let json = env.to_json().unwrap();
 //         let bytes = json.into_bytes();
-//         
+//
 //         assert!(!bytes.is_empty());
-//         
+//
 //         let restored = String::from_utf8(bytes).unwrap();
 //         let restored_env: MixnetMessage = serde_json::from_str(&restored).unwrap();
-//         
+//
 //         assert_eq!(restored_env.action, "send");
 //         assert_eq!(restored_env.content, Some("test message".to_string()));
 //         assert_eq!(restored_env.signature, Some("test sig".to_string()));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_handshake_message_format() {
 //         let env = MixnetMessage::send("handshake", "");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"action\":\"send\""));
 //         assert!(json.contains("\"content\":\"handshake\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_large_message_handling() {
 //         let large_content = "x".repeat(1000);
 //         let env = MixnetMessage::send(&large_content, "sig");
 //         let json = env.to_json().unwrap();
 //         let bytes = json.into_bytes();
-//         
+//
 //         assert!(bytes.len() > 1000);
-//         
+//
 //         let restored = String::from_utf8(bytes).unwrap();
 //         let restored_env: MixnetMessage = serde_json::from_str(&restored).unwrap();
-//         
+//
 //         assert_eq!(restored_env.content, Some(large_content));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_unicode_message_handling() {
 //         let unicode_content = "Hello 🌍 世界 🦀";
 //         let env = MixnetMessage::send(unicode_content, "sig");
 //         let json = env.to_json().unwrap();
 //         let bytes = json.into_bytes();
-//         
+//
 //         let restored = String::from_utf8(bytes).unwrap();
 //         let restored_env: MixnetMessage = serde_json::from_str(&restored).unwrap();
-//         
+//
 //         assert_eq!(restored_env.content, Some(unicode_content.to_string()));
 //     }
-// 
-//     #[tokio::test] 
+//
+//     #[tokio::test]
 //     async fn test_empty_content_handling() {
 //         let env = MixnetMessage::send("", "empty_sig");
 //         let json = env.to_json().unwrap();
-//         
+//
 //         assert!(json.contains("\"content\":\"\""));
 //         assert!(json.contains("\"signature\":\"empty_sig\""));
 //     }
-// 
+//
 //     #[tokio::test]
 //     async fn test_message_validation() {
 //         let env = MixnetMessage::query("valid_user");
 //         assert_eq!(env.action, "query");
 //         assert!(env.username.is_some());
-//         
+//
 //         let env2 = MixnetMessage::register("user", "pk");
 //         assert_eq!(env2.action, "register");
 //         assert!(env2.username.is_some());

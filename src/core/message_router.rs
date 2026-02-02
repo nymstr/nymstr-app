@@ -39,35 +39,30 @@ impl MessageRouter {
             }
 
             // MLS protocol messages (key package exchange)
-            "keyPackageRequest" | "groupWelcome" => {
-                MessageRoute::MlsProtocol
-            }
+            "keyPackageRequest" | "groupWelcome" => MessageRoute::MlsProtocol,
 
             // MLS Welcome flow messages (group invitation and joining)
-            "mlsWelcome" | "groupInvite" | "groupJoinRequest" | "welcomeAck"
-            | "keyPackageForGroup" | "keyPackageForGroupResponse" => {
-                MessageRoute::WelcomeFlow
-            }
+            "mlsWelcome"
+            | "groupInvite"
+            | "groupJoinRequest"
+            | "welcomeAck"
+            | "keyPackageForGroup"
+            | "keyPackageForGroupResponse" => MessageRoute::WelcomeFlow,
 
             // MLS chat messages (all messages use MLS now)
-            "send" | "incomingMessage" => {
-                MessageRoute::MlsProtocol
-            }
+            "send" | "incomingMessage" => MessageRoute::MlsProtocol,
 
             // Handshake for P2P discovery
-            "handshake" => {
-                MessageRoute::Handshake
-            }
+            "handshake" => MessageRoute::Handshake,
 
             // Query operations
-            "queryResponse" => {
-                MessageRoute::Query
-            }
+            "queryResponse" => MessageRoute::Query,
 
             // Group server responses
-            "fetchGroupResponse" | "sendGroupResponse" | "registerResponse" | "approveGroupResponse" => {
-                MessageRoute::Group
-            }
+            "fetchGroupResponse"
+            | "sendGroupResponse"
+            | "registerResponse"
+            | "approveGroupResponse" => MessageRoute::Group,
 
             // Unknown message type
             _ => MessageRoute::Unknown,
@@ -129,11 +124,19 @@ mod tests {
 
     #[test]
     fn test_authentication_routing() {
-        let messages = ["challenge", "challengeResponse", "loginResponse", "sendResponse"];
+        let messages = [
+            "challenge",
+            "challengeResponse",
+            "loginResponse",
+            "sendResponse",
+        ];
 
         for action in messages {
             let incoming = create_test_incoming(action);
-            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::Authentication);
+            assert_eq!(
+                MessageRouter::route_message(&incoming),
+                MessageRoute::Authentication
+            );
         }
     }
 
@@ -143,7 +146,10 @@ mod tests {
 
         for action in messages {
             let incoming = create_test_incoming(action);
-            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::MlsProtocol);
+            assert_eq!(
+                MessageRouter::route_message(&incoming),
+                MessageRoute::MlsProtocol
+            );
         }
     }
 
@@ -155,14 +161,20 @@ mod tests {
         for action in messages {
             let incoming = create_test_incoming(action);
             // All chat messages now go through MLS
-            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::MlsProtocol);
+            assert_eq!(
+                MessageRouter::route_message(&incoming),
+                MessageRoute::MlsProtocol
+            );
         }
     }
 
     #[test]
     fn test_handshake_routing() {
         let incoming = create_test_incoming("handshake");
-        assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::Handshake);
+        assert_eq!(
+            MessageRouter::route_message(&incoming),
+            MessageRoute::Handshake
+        );
     }
 
     #[test]
@@ -174,7 +186,10 @@ mod tests {
     #[test]
     fn test_unknown_routing() {
         let incoming = create_test_incoming("unknownAction");
-        assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::Unknown);
+        assert_eq!(
+            MessageRouter::route_message(&incoming),
+            MessageRoute::Unknown
+        );
     }
 
     #[test]
@@ -190,18 +205,35 @@ mod tests {
 
         for action in messages {
             let incoming = create_test_incoming(action);
-            assert_eq!(MessageRouter::route_message(&incoming), MessageRoute::WelcomeFlow);
+            assert_eq!(
+                MessageRouter::route_message(&incoming),
+                MessageRoute::WelcomeFlow
+            );
         }
     }
 
     #[test]
     fn test_should_process_immediately() {
-        assert!(!MessageRouter::should_process_immediately(&MessageRoute::Authentication));
-        assert!(!MessageRouter::should_process_immediately(&MessageRoute::Query));
-        assert!(MessageRouter::should_process_immediately(&MessageRoute::MlsProtocol));
-        assert!(MessageRouter::should_process_immediately(&MessageRoute::Chat));
-        assert!(MessageRouter::should_process_immediately(&MessageRoute::Handshake));
-        assert!(MessageRouter::should_process_immediately(&MessageRoute::WelcomeFlow));
-        assert!(!MessageRouter::should_process_immediately(&MessageRoute::Unknown));
+        assert!(!MessageRouter::should_process_immediately(
+            &MessageRoute::Authentication
+        ));
+        assert!(!MessageRouter::should_process_immediately(
+            &MessageRoute::Query
+        ));
+        assert!(MessageRouter::should_process_immediately(
+            &MessageRoute::MlsProtocol
+        ));
+        assert!(MessageRouter::should_process_immediately(
+            &MessageRoute::Chat
+        ));
+        assert!(MessageRouter::should_process_immediately(
+            &MessageRoute::Handshake
+        ));
+        assert!(MessageRouter::should_process_immediately(
+            &MessageRoute::WelcomeFlow
+        ));
+        assert!(!MessageRouter::should_process_immediately(
+            &MessageRoute::Unknown
+        ));
     }
 }

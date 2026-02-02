@@ -3,14 +3,14 @@
 //! This module contains the background task that periodically retries buffered MLS messages
 //! that couldn't be decrypted due to epoch mismatches.
 
-use crate::crypto::{MlsConversationManager, SecurePassphrase};
 use crate::core::db::Db;
 use crate::core::mixnet_client::MixnetService;
+use crate::crypto::{MlsConversationManager, SecurePassphrase};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::broadcast;
 
-use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use pgp::composed::{SignedPublicKey, SignedSecretKey};
 
 /// Type alias for Arc-wrapped PGP secret key to reduce expensive cloning
 pub type ArcSecretKey = Arc<SignedSecretKey>;
@@ -41,6 +41,7 @@ const MESSAGE_EXPIRY_SECS: i64 = 3600;
 /// * `pgp_passphrase` - Optional Arc-wrapped secure passphrase (cheap to clone)
 /// * `mls_storage_path` - Optional MLS storage path
 /// * `shutdown_rx` - Broadcast receiver for shutdown signal
+#[allow(clippy::too_many_arguments)]
 pub async fn start_buffer_processor(
     db: Arc<Db>,
     service: Arc<MixnetService>,
@@ -51,7 +52,10 @@ pub async fn start_buffer_processor(
     mls_storage_path: Option<String>,
     mut shutdown_rx: broadcast::Receiver<()>,
 ) {
-    log::info!("Starting background buffer processor for user: {}", current_user);
+    log::info!(
+        "Starting background buffer processor for user: {}",
+        current_user
+    );
 
     let mut interval = tokio::time::interval(Duration::from_secs(BUFFER_RETRY_INTERVAL_SECS));
     let mut cleanup_counter: u64 = 0;

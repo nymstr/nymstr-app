@@ -1,20 +1,20 @@
 //! PGP key generation and management using rPGP 0.16 (based on source analysis)
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
+use hmac::{Hmac, Mac};
+use pgp::composed::Deserializable;
 use pgp::composed::{
-    KeyType, SecretKeyParamsBuilder, SignedSecretKey, SignedPublicKey, SubkeyParamsBuilder
+    KeyType, SecretKeyParamsBuilder, SignedPublicKey, SignedSecretKey, SubkeyParamsBuilder,
 };
 use pgp::crypto::ecc_curve::ECCCurve;
 use pgp::types::Password;
-use pgp::composed::Deserializable;
-use std::{fs, path::Path};
+use rand::thread_rng;
+use sha2::Sha256;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use zeroize::ZeroizeOnDrop;
+use std::{fs, path::Path};
 use subtle::ConstantTimeEq;
-use sha2::Sha256;
-use hmac::{Hmac, Mac};
-use rand::thread_rng;
+use zeroize::ZeroizeOnDrop;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -125,9 +125,11 @@ impl SecurePassphrase {
 pub struct PgpKeyManager;
 
 impl PgpKeyManager {
-
     /// Generate secure PGP keypair with Ed25519 keys and proper passphrase
-    pub fn generate_keypair_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
+    pub fn generate_keypair_secure(
+        user_id: &str,
+        passphrase: &SecurePassphrase,
+    ) -> Result<(SignedSecretKey, SignedPublicKey)> {
         log::info!("Generating Ed25519 PGP keypair for user: {}", user_id);
 
         // Set up builders for subkeys (for rPGP 0.16)
@@ -154,12 +156,17 @@ impl PgpKeyManager {
             .can_encrypt(false)
             .primary_user_id(user_id.into())
             .subkeys(vec![
-                signkey.build().map_err(|e| anyhow!("Failed to build signing subkey: {}", e))?,
-                encryptkey.build().map_err(|e| anyhow!("Failed to build encryption subkey: {}", e))?,
+                signkey
+                    .build()
+                    .map_err(|e| anyhow!("Failed to build signing subkey: {}", e))?,
+                encryptkey
+                    .build()
+                    .map_err(|e| anyhow!("Failed to build encryption subkey: {}", e))?,
             ]);
 
         // Generate the components of the private key
-        let secret_key_params = key_params.build()
+        let secret_key_params = key_params
+            .build()
             .map_err(|e| anyhow!("Failed to build secret key params: {}", e))?;
         let secret_key = secret_key_params
             .generate(thread_rng())
@@ -173,13 +180,19 @@ impl PgpKeyManager {
         // Derive the public key
         let signed_public_key = SignedPublicKey::from(signed_secret_key.clone());
 
-        log::info!("Successfully generated Ed25519 PGP keypair for user: {}", user_id);
+        log::info!(
+            "Successfully generated Ed25519 PGP keypair for user: {}",
+            user_id
+        );
         Ok((signed_secret_key, signed_public_key))
     }
 
     /// Generate RSA keypair with stronger 3072-bit keys (fallback option)
     #[allow(dead_code)] // Part of public API as fallback key generation
-    pub fn generate_keypair_rsa_secure(user_id: &str, passphrase: &SecurePassphrase) -> Result<(SignedSecretKey, SignedPublicKey)> {
+    pub fn generate_keypair_rsa_secure(
+        user_id: &str,
+        passphrase: &SecurePassphrase,
+    ) -> Result<(SignedSecretKey, SignedPublicKey)> {
         log::info!("Generating RSA-3072 PGP keypair for user: {}", user_id);
 
         // Set up builders for subkeys
@@ -206,12 +219,17 @@ impl PgpKeyManager {
             .can_encrypt(false)
             .primary_user_id(user_id.into())
             .subkeys(vec![
-                signkey.build().map_err(|e| anyhow!("Failed to build signing subkey: {}", e))?,
-                encryptkey.build().map_err(|e| anyhow!("Failed to build encryption subkey: {}", e))?,
+                signkey
+                    .build()
+                    .map_err(|e| anyhow!("Failed to build signing subkey: {}", e))?,
+                encryptkey
+                    .build()
+                    .map_err(|e| anyhow!("Failed to build encryption subkey: {}", e))?,
             ]);
 
         // Generate the components of the private key
-        let secret_key_params = key_params.build()
+        let secret_key_params = key_params
+            .build()
             .map_err(|e| anyhow!("Failed to build secret key params: {}", e))?;
         let secret_key = secret_key_params
             .generate(thread_rng())
@@ -225,19 +243,27 @@ impl PgpKeyManager {
         // Derive the public key
         let signed_public_key = SignedPublicKey::from(signed_secret_key.clone());
 
-        log::info!("Successfully generated RSA-3072 PGP keypair for user: {}", user_id);
+        log::info!(
+            "Successfully generated RSA-3072 PGP keypair for user: {}",
+            user_id
+        );
         Ok((signed_secret_key, signed_public_key))
     }
 
     /// Get armored public key from PGP certificate
     pub fn public_key_armored(public_key: &SignedPublicKey) -> Result<String> {
-        public_key.to_armored_string(Default::default())
+        public_key
+            .to_armored_string(Default::default())
             .map_err(|e| anyhow!("Failed to armor public key: {}", e))
     }
 
-
     /// Save PGP keypair to storage directory with proper security
-    pub fn save_keypair_secure(username: &str, secret_key: &SignedSecretKey, public_key: &SignedPublicKey, passphrase: &SecurePassphrase) -> Result<()> {
+    pub fn save_keypair_secure(
+        username: &str,
+        secret_key: &SignedSecretKey,
+        public_key: &SignedPublicKey,
+        passphrase: &SecurePassphrase,
+    ) -> Result<()> {
         log::info!("Saving PGP keypair securely for user: {}", username);
 
         let user_dir = Path::new("storage").join(username).join("pgp_keys");
@@ -249,7 +275,8 @@ impl PgpKeyManager {
         fs::set_permissions(&user_dir, dir_perms)?;
 
         // Save secret key with integrity protection
-        let secret_armored = secret_key.to_armored_string(Default::default())
+        let secret_armored = secret_key
+            .to_armored_string(Default::default())
             .map_err(|e| anyhow!("Failed to armor secret key: {}", e))?;
         let secret_path = user_dir.join("secret.asc");
 
@@ -265,7 +292,8 @@ impl PgpKeyManager {
         fs::set_permissions(&secret_path, secret_perms)?;
 
         // Save public key (can be world-readable)
-        let public_armored = public_key.to_armored_string(Default::default())
+        let public_armored = public_key
+            .to_armored_string(Default::default())
             .map_err(|e| anyhow!("Failed to armor public key: {}", e))?;
         let public_path = user_dir.join("public.asc");
 
@@ -279,7 +307,10 @@ impl PgpKeyManager {
         public_perms.set_mode(0o644);
         fs::set_permissions(&public_path, public_perms)?;
 
-        log::info!("Successfully saved PGP keypair securely for user: {}", username);
+        log::info!(
+            "Successfully saved PGP keypair securely for user: {}",
+            username
+        );
         Ok(())
     }
 
@@ -328,9 +359,11 @@ impl PgpKeyManager {
         Ok(false)
     }
 
-
     /// Load PGP keypair from storage directory with integrity verification
-    pub fn load_keypair_secure(username: &str, passphrase: &SecurePassphrase) -> Result<Option<(SignedSecretKey, SignedPublicKey)>> {
+    pub fn load_keypair_secure(
+        username: &str,
+        passphrase: &SecurePassphrase,
+    ) -> Result<Option<(SignedSecretKey, SignedPublicKey)>> {
         log::info!("Loading PGP keypair securely for user: {}", username);
 
         let user_dir = Path::new("storage").join(username).join("pgp_keys");
@@ -345,12 +378,16 @@ impl PgpKeyManager {
         }
 
         // Migrate legacy HMACs to proper format if needed
-        if let Ok(migrated) = Self::migrate_hmac_if_needed(&secret_path, &secret_hmac_path, passphrase) {
+        if let Ok(migrated) =
+            Self::migrate_hmac_if_needed(&secret_path, &secret_hmac_path, passphrase)
+        {
             if migrated {
                 log::info!("Migrated secret key HMAC for user: {}", username);
             }
         }
-        if let Ok(migrated) = Self::migrate_hmac_if_needed(&public_path, &public_hmac_path, passphrase) {
+        if let Ok(migrated) =
+            Self::migrate_hmac_if_needed(&public_path, &public_hmac_path, passphrase)
+        {
             if migrated {
                 log::info!("Migrated public key HMAC for user: {}", username);
             }
@@ -362,8 +399,16 @@ impl PgpKeyManager {
             let stored_hmac = fs::read_to_string(&secret_hmac_path)?;
             let computed_hmac = Self::compute_file_hmac(&secret_armored, passphrase)?;
 
-            if !bool::from(stored_hmac.trim().as_bytes().ct_eq(computed_hmac.as_bytes())) {
-                return Err(anyhow!("Secret key integrity verification failed for user: {}", username));
+            if !bool::from(
+                stored_hmac
+                    .trim()
+                    .as_bytes()
+                    .ct_eq(computed_hmac.as_bytes()),
+            ) {
+                return Err(anyhow!(
+                    "Secret key integrity verification failed for user: {}",
+                    username
+                ));
             }
         } else {
             log::warn!("No HMAC file found for secret key - integrity verification skipped");
@@ -378,8 +423,16 @@ impl PgpKeyManager {
             let stored_hmac = fs::read_to_string(&public_hmac_path)?;
             let computed_hmac = Self::compute_file_hmac(&public_armored, passphrase)?;
 
-            if !bool::from(stored_hmac.trim().as_bytes().ct_eq(computed_hmac.as_bytes())) {
-                return Err(anyhow!("Public key integrity verification failed for user: {}", username));
+            if !bool::from(
+                stored_hmac
+                    .trim()
+                    .as_bytes()
+                    .ct_eq(computed_hmac.as_bytes()),
+            ) {
+                return Err(anyhow!(
+                    "Public key integrity verification failed for user: {}",
+                    username
+                ));
             }
         } else {
             log::warn!("No HMAC file found for public key - integrity verification skipped");
@@ -388,7 +441,10 @@ impl PgpKeyManager {
         let (public_key, _) = SignedPublicKey::from_string(&public_armored)
             .map_err(|e| anyhow!("Failed to parse public key: {}", e))?;
 
-        log::info!("Successfully loaded and verified PGP keypair for user: {}", username);
+        log::info!(
+            "Successfully loaded and verified PGP keypair for user: {}",
+            username
+        );
         Ok(Some((secret_key, public_key)))
     }
 

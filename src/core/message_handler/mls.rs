@@ -2,44 +2,57 @@
 //!
 //! This module contains methods for MLS client creation, handshake, and conversation establishment.
 
-use super::{MessageHandler, normalize_conversation_id};
+use super::{normalize_conversation_id, MessageHandler};
 use crate::crypto::Crypto;
 use anyhow::anyhow;
-use mls_rs::{Client, ExtensionList, CipherSuite, CryptoProvider};
 use mls_rs::client_builder::MlsConfig;
 use mls_rs::identity::MlsCredential;
+use mls_rs::{CipherSuite, Client, CryptoProvider, ExtensionList};
 use mls_rs_crypto_openssl::OpensslCryptoProvider;
-use mls_rs_provider_sqlite::{SqLiteDataStorageEngine, connection_strategy::FileConnectionStrategy};
+use mls_rs_provider_sqlite::{
+    connection_strategy::FileConnectionStrategy, SqLiteDataStorageEngine,
+};
 use serde_json::json;
 
 impl MessageHandler {
     /// Create an MLS client following the official mls-rs pattern
     /// Uses MlsKeyManager for persistent, encrypted key storage
     pub(crate) async fn create_mls_client(&self) -> anyhow::Result<Client<impl MlsConfig + use<>>> {
-        let username = self.current_user.as_ref()
+        let username = self
+            .current_user
+            .as_ref()
             .ok_or_else(|| anyhow!("No user logged in"))?;
-        let storage_path = self.mls_storage_path.as_ref()
+        let storage_path = self
+            .mls_storage_path
+            .as_ref()
             .ok_or_else(|| anyhow!("MLS storage not initialized"))?;
-        let pgp_public_key = self.pgp_public_key.as_ref()
+        let pgp_public_key = self
+            .pgp_public_key
+            .as_ref()
             .ok_or_else(|| anyhow!("PGP public key not available"))?;
-        let passphrase = self.pgp_passphrase.as_ref()
+        let passphrase = self
+            .pgp_passphrase
+            .as_ref()
             .ok_or_else(|| anyhow!("PGP passphrase not available"))?;
 
         let crypto_provider = OpensslCryptoProvider::default();
         let cipher_suite = CipherSuite::CURVE25519_AES128;
-        let cipher_suite_provider = crypto_provider.cipher_suite_provider(cipher_suite)
+        let cipher_suite_provider = crypto_provider
+            .cipher_suite_provider(cipher_suite)
             .ok_or_else(|| anyhow!("Cipher suite not supported"))?;
 
         // Load or generate persistent MLS signature keys using MlsKeyManager
-        let (secret_key, public_key) = crate::crypto::mls::client::MlsKeyManager::load_or_generate_keys(
-            &cipher_suite_provider,
-            username,
-            passphrase,
-        ).map_err(|e| anyhow!("Failed to get MLS signature keys: {}", e))?;
+        let (secret_key, public_key) =
+            crate::crypto::mls::client::MlsKeyManager::load_or_generate_keys(
+                &cipher_suite_provider,
+                username,
+                passphrase,
+            )
+            .map_err(|e| anyhow!("Failed to get MLS signature keys: {}", e))?;
 
         // Create PGP credential for MLS (reusing the credential creation from our wrapper)
-        // Dereference Arc to get &SignedPublicKey
-        let pgp_credential = crate::crypto::mls::client::PgpCredential::new(username.clone(), &**pgp_public_key)?;
+        let pgp_credential =
+            crate::crypto::mls::client::PgpCredential::new(username.clone(), pgp_public_key)?;
         let credential = pgp_credential.into_credential()?;
         let signing_identity = mls_rs::identity::SigningIdentity::new(credential, public_key);
 
@@ -50,12 +63,21 @@ impl MessageHandler {
 
         // Build the official mls-rs client
         Ok(Client::builder()
-            .group_state_storage(storage_engine.group_state_storage()
-                .map_err(|e| anyhow!("Failed to create group storage: {}", e))?)
-            .key_package_repo(storage_engine.key_package_storage()
-                .map_err(|e| anyhow!("Failed to create key package storage: {}", e))?)
-            .psk_store(storage_engine.pre_shared_key_storage()
-                .map_err(|e| anyhow!("Failed to create PSK storage: {}", e))?)
+            .group_state_storage(
+                storage_engine
+                    .group_state_storage()
+                    .map_err(|e| anyhow!("Failed to create group storage: {}", e))?,
+            )
+            .key_package_repo(
+                storage_engine
+                    .key_package_storage()
+                    .map_err(|e| anyhow!("Failed to create key package storage: {}", e))?,
+            )
+            .psk_store(
+                storage_engine
+                    .pre_shared_key_storage()
+                    .map_err(|e| anyhow!("Failed to create PSK storage: {}", e))?,
+            )
             .identity_provider(crate::crypto::mls::client::PgpIdentityProvider)
             .crypto_provider(crypto_provider)
             .signing_identity(signing_identity, secret_key, cipher_suite)
@@ -84,7 +106,7 @@ impl MessageHandler {
                     conversation_id.as_bytes().to_vec(),
                     ExtensionList::default(),
                     Default::default(),
-                    None
+                    None,
                 )?
             }
         };
@@ -94,7 +116,8 @@ impl MessageHandler {
         let handshake_str = handshake.to_string();
 
         // Encrypt using MLS
-        let encrypted_message = group.encrypt_application_message(handshake_str.as_bytes(), Default::default())?;
+        let encrypted_message =
+            group.encrypt_application_message(handshake_str.as_bytes(), Default::default())?;
 
         // Build payload with MLS message
         let mls_message_bytes = encrypted_message.to_bytes()?;
@@ -115,10 +138,14 @@ impl MessageHandler {
 
         // Sign with PGP
         let payload_str = payload.to_string();
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, payload_str.as_bytes(), passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
+            return Err(anyhow!(
+                "PGP secret key or passphrase not available for signing"
+            ));
         };
 
         // Send encrypted handshake
@@ -129,25 +156,38 @@ impl MessageHandler {
     }
 
     /// Establish MLS conversation with recipient through key package exchange
-    pub(crate) async fn establish_mls_conversation(&mut self, recipient: &str) -> anyhow::Result<()> {
+    pub(crate) async fn establish_mls_conversation(
+        &mut self,
+        recipient: &str,
+    ) -> anyhow::Result<()> {
         let user = self.current_user.as_deref().unwrap_or("");
 
         // Create MLS client
         let client = self.create_mls_client().await?;
 
         // Generate our key package
-        let our_key_package = client.generate_key_package_message(Default::default(), Default::default(), None)?;
+        let our_key_package =
+            client.generate_key_package_message(Default::default(), Default::default(), None)?;
 
         // Sign the key package request
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, &our_key_package.to_bytes()?, passphrase)?
         } else {
-            return Err(anyhow!("PGP secret key or passphrase not available for signing"));
+            return Err(anyhow!(
+                "PGP secret key or passphrase not available for signing"
+            ));
         };
 
         // Send key package request to recipient
-        let key_package_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package.to_bytes()?);
-        self.service.send_key_package_request(user, recipient, &key_package_b64, &signature).await?;
+        let key_package_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &our_key_package.to_bytes()?,
+        );
+        self.service
+            .send_key_package_request(user, recipient, &key_package_b64, &signature)
+            .await?;
 
         // Wait for key package response
         let timeout_duration = std::time::Duration::from_secs(30);

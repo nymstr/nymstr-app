@@ -3,7 +3,9 @@
 //! This module contains methods for managing MLS group state, credentials, key packages,
 //! welcomes, and GroupInfo.
 
-use super::{Db, sanitize_table_name, StoredCredential, StoredKeyPackage, StoredWelcome, MlsGroupInfoPublic};
+use super::{
+    sanitize_table_name, Db, MlsGroupInfoPublic, StoredCredential, StoredKeyPackage, StoredWelcome,
+};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -12,7 +14,12 @@ impl Db {
     // ========== MLS Group State ==========
 
     /// Save MLS group state for a conversation.
-    pub async fn save_mls_group_state(&self, me: &str, conversation_id: &str, group_state: &[u8]) -> Result<()> {
+    pub async fn save_mls_group_state(
+        &self,
+        me: &str,
+        conversation_id: &str,
+        group_state: &[u8],
+    ) -> Result<()> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("mls_groups_{}", safe_name);
         sqlx::query(&format!(
@@ -31,7 +38,11 @@ impl Db {
 
     /// Load MLS group state for a conversation.
     #[allow(dead_code)] // Part of public API for MLS state management
-    pub async fn load_mls_group_state(&self, me: &str, conversation_id: &str) -> Result<Option<Vec<u8>>> {
+    pub async fn load_mls_group_state(
+        &self,
+        me: &str,
+        conversation_id: &str,
+    ) -> Result<Option<Vec<u8>>> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("mls_groups_{}", safe_name);
         if let Some(row) = sqlx::query(&format!(
@@ -85,6 +96,7 @@ impl Db {
 
     /// Store an MLS credential for a user
     #[allow(dead_code)] // Part of public API for MLS credential management
+    #[allow(clippy::too_many_arguments)]
     pub async fn store_credential(
         &self,
         me: &str,
@@ -117,7 +129,11 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
-        log::info!("Stored MLS credential for user {} (owner: {})", username, me);
+        log::info!(
+            "Stored MLS credential for user {} (owner: {})",
+            username,
+            me
+        );
         Ok(())
     }
 
@@ -331,11 +347,7 @@ impl Db {
     ///
     /// # Returns
     /// The ID of the stored welcome
-    pub async fn store_welcome(
-        &self,
-        me: &str,
-        welcome: &StoredWelcome,
-    ) -> Result<i64> {
+    pub async fn store_welcome(&self, me: &str, welcome: &StoredWelcome) -> Result<i64> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_welcomes_{}", safe_name);
 
@@ -343,7 +355,9 @@ impl Db {
         let welcome_bytes = base64::engine::general_purpose::STANDARD
             .decode(&welcome.welcome_bytes)
             .map_err(|e| anyhow::anyhow!("Failed to decode welcome_bytes: {}", e))?;
-        let ratchet_tree = welcome.ratchet_tree.as_ref()
+        let ratchet_tree = welcome
+            .ratchet_tree
+            .as_ref()
             .map(|rt| base64::engine::general_purpose::STANDARD.decode(rt))
             .transpose()
             .map_err(|e| anyhow::anyhow!("Failed to decode ratchet_tree: {}", e))?;
@@ -366,7 +380,13 @@ impl Db {
         .await?;
 
         let id = result.last_insert_rowid();
-        log::info!("Stored welcome {} for group {} from {} (user: {})", id, &welcome.group_id, &welcome.sender, me);
+        log::info!(
+            "Stored welcome {} for group {} from {} (user: {})",
+            id,
+            &welcome.group_id,
+            &welcome.sender,
+            me
+        );
         Ok(id)
     }
 
@@ -399,7 +419,8 @@ impl Db {
                 group_id: row.try_get("group_id")?,
                 sender: row.try_get("sender")?,
                 welcome_bytes: base64::engine::general_purpose::STANDARD.encode(&welcome_bytes_raw),
-                ratchet_tree: ratchet_tree_raw.map(|rt| base64::engine::general_purpose::STANDARD.encode(&rt)),
+                ratchet_tree: ratchet_tree_raw
+                    .map(|rt| base64::engine::general_purpose::STANDARD.encode(&rt)),
                 cipher_suite: row.try_get::<i64, _>("cipher_suite")? as u16,
                 epoch: row.try_get::<i64, _>("epoch")? as u64,
                 received_at: row.try_get::<String, _>("received_at")?,
@@ -443,7 +464,12 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
-        log::warn!("Marked welcome {} as failed for user {}: {}", welcome_id, me, error);
+        log::warn!(
+            "Marked welcome {} as failed for user {}: {}",
+            welcome_id,
+            me,
+            error
+        );
         Ok(())
     }
 
@@ -505,13 +531,22 @@ impl Db {
         .execute(&self.pool)
         .await?;
 
-        log::info!("Stored group info for {} at epoch {} (user: {})", group_id, group_info.epoch, me);
+        log::info!(
+            "Stored group info for {} at epoch {} (user: {})",
+            group_id,
+            group_info.epoch,
+            me
+        );
         Ok(())
     }
 
     /// Get GroupInfo for a group
     #[allow(dead_code)] // Part of public API for group info management
-    pub async fn get_group_info(&self, me: &str, group_id: &str) -> Result<Option<MlsGroupInfoPublic>> {
+    pub async fn get_group_info(
+        &self,
+        me: &str,
+        group_id: &str,
+    ) -> Result<Option<MlsGroupInfoPublic>> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_info_{}", safe_name);
 
@@ -535,11 +570,15 @@ impl Db {
 
                 Ok(Some(MlsGroupInfoPublic {
                     group_id: r.try_get("group_id")?,
-                    mls_group_id: r.try_get::<Option<String>, _>("mls_group_id")?.unwrap_or_default(),
+                    mls_group_id: r
+                        .try_get::<Option<String>, _>("mls_group_id")?
+                        .unwrap_or_default(),
                     epoch: r.try_get::<i64, _>("epoch")? as u64,
                     tree_hash: r.try_get("tree_hash")?,
-                    group_info_bytes: base64::engine::general_purpose::STANDARD.encode(&group_info_bytes_raw),
-                    external_pub: external_pub_raw.map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
+                    group_info_bytes: base64::engine::general_purpose::STANDARD
+                        .encode(&group_info_bytes_raw),
+                    external_pub: external_pub_raw
+                        .map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
                     created_by: r.try_get("created_by")?,
                     created_at: r.try_get::<i64, _>("created_at")? as u64,
                 }))
@@ -621,11 +660,15 @@ impl Db {
 
             groups.push(MlsGroupInfoPublic {
                 group_id: r.try_get("group_id")?,
-                mls_group_id: r.try_get::<Option<String>, _>("mls_group_id")?.unwrap_or_default(),
+                mls_group_id: r
+                    .try_get::<Option<String>, _>("mls_group_id")?
+                    .unwrap_or_default(),
                 epoch: r.try_get::<i64, _>("epoch")? as u64,
                 tree_hash: r.try_get("tree_hash")?,
-                group_info_bytes: base64::engine::general_purpose::STANDARD.encode(&group_info_bytes_raw),
-                external_pub: external_pub_raw.map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
+                group_info_bytes: base64::engine::general_purpose::STANDARD
+                    .encode(&group_info_bytes_raw),
+                external_pub: external_pub_raw
+                    .map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
                 created_by: r.try_get("created_by")?,
                 created_at: r.try_get::<i64, _>("created_at")? as u64,
             });

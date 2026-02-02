@@ -2,9 +2,9 @@
 
 #![allow(dead_code)] // Many types are part of the public API for MLS operations
 
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use anyhow::{Result, anyhow};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// MLS encrypted message format
@@ -155,7 +155,11 @@ impl MlsCredential {
 
         // Constant-time comparison to prevent timing attacks
         use subtle::ConstantTimeEq;
-        bool::from(computed_fingerprint.as_slice().ct_eq(&self.pgp_key_fingerprint))
+        bool::from(
+            computed_fingerprint
+                .as_slice()
+                .ct_eq(&self.pgp_key_fingerprint),
+        )
     }
 
     /// Check if the credential has expired
@@ -193,17 +197,12 @@ impl MlsCredential {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        if now >= self.expires_at {
-            0
-        } else {
-            self.expires_at - now
-        }
+        self.expires_at.saturating_sub(now)
     }
 
     /// Serialize the credential to bytes for storage or transmission
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self)
-            .map_err(|e| anyhow!("Failed to serialize MlsCredential: {}", e))
+        serde_json::to_vec(self).map_err(|e| anyhow!("Failed to serialize MlsCredential: {}", e))
     }
 
     /// Deserialize a credential from bytes
@@ -251,9 +250,8 @@ impl MlsWelcome {
         use base64::Engine;
 
         let welcome_b64 = base64::engine::general_purpose::STANDARD.encode(welcome_bytes);
-        let ratchet_tree_b64 = ratchet_tree.map(|rt| {
-            base64::engine::general_purpose::STANDARD.encode(rt)
-        });
+        let ratchet_tree_b64 =
+            ratchet_tree.map(|rt| base64::engine::general_purpose::STANDARD.encode(rt));
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -295,8 +293,7 @@ impl MlsWelcome {
 
     /// Serialize the welcome to JSON bytes
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
-        serde_json::to_vec(self)
-            .map_err(|e| anyhow!("Failed to serialize MlsWelcome: {}", e))
+        serde_json::to_vec(self).map_err(|e| anyhow!("Failed to serialize MlsWelcome: {}", e))
     }
 
     /// Deserialize from JSON bytes
@@ -376,9 +373,8 @@ impl MlsGroupInfoPublic {
 
         let mls_group_id_b64 = base64::engine::general_purpose::STANDARD.encode(mls_group_id);
         let group_info_b64 = base64::engine::general_purpose::STANDARD.encode(group_info_bytes);
-        let external_pub_b64 = external_pub.map(|ep| {
-            base64::engine::general_purpose::STANDARD.encode(ep)
-        });
+        let external_pub_b64 =
+            external_pub.map(|ep| base64::engine::general_purpose::STANDARD.encode(ep));
 
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -558,8 +554,8 @@ mod tests {
         let pgp_key = b"test_pgp_key_bytes";
         let mls_key = vec![10, 20, 30];
 
-        let credential = MlsCredential::new(username, pgp_key, mls_key)
-            .expect("Failed to create credential");
+        let credential =
+            MlsCredential::new(username, pgp_key, mls_key).expect("Failed to create credential");
 
         // Should verify with same key
         assert!(credential.verify_pgp_binding(pgp_key));

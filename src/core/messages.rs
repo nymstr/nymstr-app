@@ -1,10 +1,10 @@
 //! Definition and serialization of mixnet envelope messages
 #![allow(dead_code)]
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use chrono;
-use base64;
 use crate::crypto::mls::types::MlsWelcome;
+use anyhow::Result;
+use base64;
+use chrono;
+use serde::{Deserialize, Serialize};
 
 /// Unified message format for all Nymstr communications
 #[derive(Serialize, Deserialize, Debug)]
@@ -94,7 +94,13 @@ impl MixnetMessage {
     }
 
     /// Send a message via the central mixnet server
-    pub fn send(sender: &str, recipient: &str, mls_message: &str, conversation_id: &str, signature: &str) -> Self {
+    pub fn send(
+        sender: &str,
+        recipient: &str,
+        mls_message: &str,
+        conversation_id: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "conversation_id": conversation_id,
             "mls_message": mls_message
@@ -128,7 +134,13 @@ impl MixnetMessage {
     }
 
     /// Create a direct p2p message envelope
-    pub fn direct_message(sender: &str, recipient: &str, mls_message: &str, conversation_id: &str, signature: &str) -> Self {
+    pub fn direct_message(
+        sender: &str,
+        recipient: &str,
+        mls_message: &str,
+        conversation_id: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "conversation_id": conversation_id,
             "mls_message": mls_message
@@ -145,7 +157,12 @@ impl MixnetMessage {
     }
 
     /// Response to challenge
-    pub fn challenge_response(sender: &str, recipient: &str, signed_nonce: &str, context: &str) -> Self {
+    pub fn challenge_response(
+        sender: &str,
+        recipient: &str,
+        signed_nonce: &str,
+        context: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "signature": signed_nonce,
             "context": context
@@ -203,7 +220,12 @@ impl MixnetMessage {
     }
 
     /// Registration challenge response from server
-    pub fn registration_response(sender: &str, recipient: &str, result: &str, context: &str) -> Self {
+    pub fn registration_response(
+        sender: &str,
+        recipient: &str,
+        result: &str,
+        context: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "result": result,
             "context": context
@@ -237,7 +259,12 @@ impl MixnetMessage {
     }
 
     /// Request key package from another user for MLS group establishment
-    pub fn key_package_request(sender: &str, recipient: &str, sender_key_package: &str, signature: &str) -> Self {
+    pub fn key_package_request(
+        sender: &str,
+        recipient: &str,
+        sender_key_package: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "senderKeyPackage": sender_key_package
         });
@@ -253,7 +280,13 @@ impl MixnetMessage {
     }
 
     /// Response with key package for MLS group establishment
-    pub fn key_package_response(sender: &str, recipient: &str, sender_key_package: &str, recipient_key_package: &str, signature: &str) -> Self {
+    pub fn key_package_response(
+        sender: &str,
+        recipient: &str,
+        sender_key_package: &str,
+        recipient_key_package: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "senderKeyPackage": sender_key_package,
             "recipientKeyPackage": recipient_key_package
@@ -270,7 +303,13 @@ impl MixnetMessage {
     }
 
     /// Send MLS group welcome message to establish shared group
-    pub fn group_welcome(sender: &str, recipient: &str, welcome_message: &str, group_id: &str, signature: &str) -> Self {
+    pub fn group_welcome(
+        sender: &str,
+        recipient: &str,
+        welcome_message: &str,
+        group_id: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "welcomeMessage": welcome_message,
             "groupId": group_id
@@ -287,7 +326,13 @@ impl MixnetMessage {
     }
 
     /// Confirm joining MLS group
-    pub fn group_join_response(sender: &str, recipient: &str, group_id: &str, success: bool, signature: &str) -> Self {
+    pub fn group_join_response(
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        success: bool,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "groupId": group_id,
             "success": success
@@ -337,7 +382,13 @@ impl MixnetMessage {
 
     /// Register with a group server using timestamp-based authentication
     /// The signature should be over: "register:{username}:{server_address}:{timestamp}"
-    pub fn register_with_group_server(username: &str, public_key: &str, signature: &str, timestamp: i64, server_address: &str) -> Self {
+    pub fn register_with_group_server(
+        username: &str,
+        public_key: &str,
+        signature: &str,
+        timestamp: i64,
+        server_address: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "username": username,
             "publicKey": public_key,
@@ -372,7 +423,12 @@ impl MixnetMessage {
     }
 
     /// Create MLS encrypted message using unified format
-    pub fn mls_message(sender: &str, recipient: &str, encrypted_message: &crate::crypto::EncryptedMessage, signature: &str) -> Self {
+    pub fn mls_message(
+        sender: &str,
+        recipient: &str,
+        encrypted_message: &crate::crypto::EncryptedMessage,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "conversation_id": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &encrypted_message.conversation_id),
             "mls_message": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &encrypted_message.mls_message)
@@ -415,7 +471,12 @@ impl MixnetMessage {
     /// * `recipient` - The user being invited
     /// * `welcome` - The MlsWelcome structure
     /// * `signature` - PGP signature of the welcome
-    pub fn mls_welcome(sender: &str, recipient: &str, welcome: &MlsWelcome, signature: &str) -> Self {
+    pub fn mls_welcome(
+        sender: &str,
+        recipient: &str,
+        welcome: &MlsWelcome,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "group_id": welcome.group_id,
             "cipher_suite": welcome.cipher_suite,
@@ -445,7 +506,12 @@ impl MixnetMessage {
     /// * `group_id` - The group they want to join
     /// * `key_package` - Base64-encoded KeyPackage
     /// * `signature` - PGP signature of the request
-    pub fn group_join_request(sender: &str, group_id: &str, key_package: &str, signature: &str) -> Self {
+    pub fn group_join_request(
+        sender: &str,
+        group_id: &str,
+        key_package: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "groupId": group_id,
             "keyPackage": key_package
@@ -471,7 +537,13 @@ impl MixnetMessage {
     /// * `group_id` - The group that was joined
     /// * `success` - Whether joining was successful
     /// * `signature` - PGP signature of the acknowledgment
-    pub fn welcome_ack(sender: &str, recipient: &str, group_id: &str, success: bool, signature: &str) -> Self {
+    pub fn welcome_ack(
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        success: bool,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "groupId": group_id,
             "success": success
@@ -498,7 +570,13 @@ impl MixnetMessage {
     /// * `group_id` - The group they're being invited to
     /// * `group_name` - Optional human-readable group name
     /// * `signature` - PGP signature of the invite
-    pub fn group_invite(sender: &str, recipient: &str, group_id: &str, group_name: Option<&str>, signature: &str) -> Self {
+    pub fn group_invite(
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        group_name: Option<&str>,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "groupId": group_id,
             "groupName": group_name.unwrap_or(group_id)
@@ -521,7 +599,12 @@ impl MixnetMessage {
     /// * `recipient` - The user to request the KeyPackage from
     /// * `group_id` - The group they'll be added to
     /// * `signature` - PGP signature of the request
-    pub fn key_package_for_group(sender: &str, recipient: &str, group_id: &str, signature: &str) -> Self {
+    pub fn key_package_for_group(
+        sender: &str,
+        recipient: &str,
+        group_id: &str,
+        signature: &str,
+    ) -> Self {
         let payload = serde_json::json!({
             "groupId": group_id,
             "purpose": "groupJoin"
@@ -778,7 +861,8 @@ mod tests {
 
     #[test]
     fn test_challenge_response_message() {
-        let msg = MixnetMessage::challenge_response("alice", "server", "signed_nonce", "registration");
+        let msg =
+            MixnetMessage::challenge_response("alice", "server", "signed_nonce", "registration");
         assert_eq!(msg.message_type, "system");
         assert_eq!(msg.action, "registrationResponse");
         assert_eq!(msg.sender, "alice");
@@ -800,7 +884,8 @@ mod tests {
 
     #[test]
     fn test_registration_response_message() {
-        let msg = MixnetMessage::registration_response("server", "alice", "success", "registration");
+        let msg =
+            MixnetMessage::registration_response("server", "alice", "success", "registration");
         assert_eq!(msg.message_type, "response");
         assert_eq!(msg.action, "challengeResponse");
         assert_eq!(msg.sender, "server");

@@ -2,10 +2,10 @@
 //!
 //! This module contains registration, login, and user query methods.
 
-use super::{MessageHandler, ArcSecretKey, ArcPublicKey, ArcPassphrase};
-use crate::crypto::{Crypto, SecurePassphrase, PgpKeyManager};
-use crate::crypto::mls::persistence::MlsGroupPersistence;
+use super::{ArcPassphrase, ArcPublicKey, ArcSecretKey, MessageHandler};
 use crate::core::auth_handler::AuthenticationHandler;
+use crate::crypto::mls::persistence::MlsGroupPersistence;
+use crate::crypto::{Crypto, PgpKeyManager, SecurePassphrase};
 use std::sync::Arc;
 
 impl MessageHandler {
@@ -27,19 +27,29 @@ impl MessageHandler {
             log::info!("Loading existing PGP keys for user: {}", username);
             match PgpKeyManager::load_keypair_secure(username, &passphrase)? {
                 Some((secret, public)) => {
-                    log::info!("Successfully loaded existing PGP keys for user: {}", username);
+                    log::info!(
+                        "Successfully loaded existing PGP keys for user: {}",
+                        username
+                    );
                     (secret, public)
                 }
                 None => {
                     log::info!("Generating new PGP keys for registration: {}", username);
-                    let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
-                    PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
+                    let (new_secret, new_public) =
+                        Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
+                    PgpKeyManager::save_keypair_secure(
+                        username,
+                        &new_secret,
+                        &new_public,
+                        &passphrase,
+                    )?;
                     (new_secret, new_public)
                 }
             }
         } else {
             log::info!("Generating new PGP keys for registration: {}", username);
-            let (new_secret, new_public) = Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
+            let (new_secret, new_public) =
+                Crypto::generate_pgp_keypair_secure(username, &passphrase)?;
             PgpKeyManager::save_keypair_secure(username, &new_secret, &new_public, &passphrase)?;
             (new_secret, new_public)
         };
@@ -57,7 +67,7 @@ impl MessageHandler {
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
 
         // Get armored public key (dereference Arc to get reference)
-        let public_key_armored = Crypto::pgp_public_key_armored(&*arc_public_key)?;
+        let public_key_armored = Crypto::pgp_public_key_armored(&arc_public_key)?;
 
         // Persist and send the public key in armored format
         self.db.register_user(username, &public_key_armored).await?;
@@ -166,7 +176,10 @@ impl MessageHandler {
         // Initialize MLS storage path for client creation
         self.mls_storage_path = Some(crate::core::db::get_mls_db_path(username));
         // Initialize MLS group persistence
-        self.mls_persistence = Some(MlsGroupPersistence::new(username.to_string(), self.db.clone()));
+        self.mls_persistence = Some(MlsGroupPersistence::new(
+            username.to_string(),
+            self.db.clone(),
+        ));
 
         // Create authentication handler for processing responses
         // Arc::clone is cheap - just increments reference count
@@ -258,21 +271,18 @@ impl MessageHandler {
                     if let Some(incoming) = incoming {
                         let env = incoming.envelope;
                         let action = env.action.as_str();
-                        match action {
-                            "queryResponse" => {
-                                if let (Some(user), Some(pk)) = (
-                                    env.payload.get("username").and_then(|u| u.as_str()),
-                                    env.payload.get("publicKey").and_then(|k| k.as_str()),
-                                ) {
-                                    let res = (user.to_string(), pk.to_string());
-                                    if let Some(me) = &self.current_user {
-                                        let _ = self.db.add_contact(me, user, pk).await;
-                                    }
-                                    return Ok(Some(res));
+                        if action == "queryResponse" {
+                            if let (Some(user), Some(pk)) = (
+                                env.payload.get("username").and_then(|u| u.as_str()),
+                                env.payload.get("publicKey").and_then(|k| k.as_str()),
+                            ) {
+                                let res = (user.to_string(), pk.to_string());
+                                if let Some(me) = &self.current_user {
+                                    let _ = self.db.add_contact(me, user, pk).await;
                                 }
-                                return Ok(None);
+                                return Ok(Some(res));
                             }
-                            _ => {}
+                            return Ok(None);
                         }
                     } else {
                         // Channel closed

@@ -1,9 +1,9 @@
 //! Core Key Management - handles password prompting and key operations
 
-use anyhow::{Result, anyhow};
-use pgp::composed::{SignedSecretKey, SignedPublicKey};
 use crate::crypto::pgp::{PgpKeyManager, SecurePassphrase};
 use crate::crypto::Crypto;
+use anyhow::{anyhow, Result};
+use pgp::composed::{SignedPublicKey, SignedSecretKey};
 
 /// Handles PGP key management at the CLI level with proper user interaction
 pub struct KeyManager;
@@ -11,7 +11,9 @@ pub struct KeyManager;
 impl KeyManager {
     /// Load existing keys or create new ones with user password prompting
     /// This is the main entry point for CLI key management
-    pub fn load_or_create_keys(username: &str) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
+    pub fn load_or_create_keys(
+        username: &str,
+    ) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
         if PgpKeyManager::keys_exist(username) {
             Self::load_existing_keys(username)
         } else {
@@ -20,12 +22,14 @@ impl KeyManager {
     }
 
     /// Create new keys for a user (called during registration)
-    pub fn create_new_keys(username: &str) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
+    pub fn create_new_keys(
+        username: &str,
+    ) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
         log::info!("Creating new PGP keys for user: {}", username);
 
         // Check for env variable first, otherwise prompt user
         let passphrase = Self::get_passphrase_from_env_or_prompt(
-            "Create a secure passphrase for your PGP keys (min 12 characters)"
+            "Create a secure passphrase for your PGP keys (min 12 characters)",
         )?;
 
         // Generate Ed25519 keys with the user's passphrase
@@ -39,21 +43,27 @@ impl KeyManager {
     }
 
     /// Load existing keys for a user (called during login)
-    pub fn load_existing_keys(username: &str) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
+    pub fn load_existing_keys(
+        username: &str,
+    ) -> Result<(SignedSecretKey, SignedPublicKey, SecurePassphrase)> {
         log::info!("Loading existing PGP keys for user: {}", username);
 
         // Check for env variable first, otherwise prompt user
-        let passphrase = Self::get_passphrase_from_env_or_prompt(
-            "Enter your passphrase to unlock PGP keys"
-        )?;
+        let passphrase =
+            Self::get_passphrase_from_env_or_prompt("Enter your passphrase to unlock PGP keys")?;
 
         // Try to load keys with secure verification
-        if let Some((secret_key, public_key)) = PgpKeyManager::load_keypair_secure(username, &passphrase)? {
+        if let Some((secret_key, public_key)) =
+            PgpKeyManager::load_keypair_secure(username, &passphrase)?
+        {
             log::info!("PGP keys loaded successfully for: {}", username);
             Ok((secret_key, public_key, passphrase))
         } else {
             // No secure keys found
-            Err(anyhow!("Could not load PGP keys for user: {}. Check your passphrase or re-register.", username))
+            Err(anyhow!(
+                "Could not load PGP keys for user: {}. Check your passphrase or re-register.",
+                username
+            ))
         }
     }
 
@@ -85,7 +95,9 @@ impl KeyManager {
     fn get_passphrase_from_env_or_prompt(prompt: &str) -> Result<SecurePassphrase> {
         if let Ok(env_passphrase) = std::env::var("NYMSTR_PGP_PASSPHRASE") {
             if env_passphrase.len() < 12 {
-                return Err(anyhow!("NYMSTR_PGP_PASSPHRASE must be at least 12 characters"));
+                return Err(anyhow!(
+                    "NYMSTR_PGP_PASSPHRASE must be at least 12 characters"
+                ));
             }
             log::info!("Using passphrase from NYMSTR_PGP_PASSPHRASE environment variable");
             Ok(SecurePassphrase::new(env_passphrase))

@@ -3,7 +3,7 @@
 //! This module contains methods for managing group memberships, group servers,
 //! group invites, and join requests.
 
-use super::{Db, sanitize_table_name, GroupMember};
+use super::{sanitize_table_name, Db, GroupMember};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -49,7 +49,9 @@ impl Db {
 
         log::info!(
             "Added group membership: {} in {} (verified: {})",
-            member_username, conversation_id, credential_verified
+            member_username,
+            conversation_id,
+            credential_verified
         );
         Ok(())
     }
@@ -104,11 +106,7 @@ impl Db {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_memberships_{}", safe_name);
 
-        let verified_at: Option<DateTime<Utc>> = if verified {
-            Some(Utc::now())
-        } else {
-            None
-        };
+        let verified_at: Option<DateTime<Utc>> = if verified { Some(Utc::now()) } else { None };
 
         sqlx::query(&format!(
             r#"
@@ -201,7 +199,10 @@ impl Db {
 
         log::info!(
             "Stored group server association: group={}, server={}, admin={}, mls_group_id={:?}",
-            group_id, server_address, admin_username, mls_group_id
+            group_id,
+            server_address,
+            admin_username,
+            mls_group_id
         );
         Ok(())
     }
@@ -228,7 +229,8 @@ impl Db {
             (
                 r.try_get::<String, _>("server_address").unwrap(),
                 r.try_get::<String, _>("admin_username").unwrap(),
-                r.try_get::<Option<String>, _>("mls_group_id").unwrap_or(None),
+                r.try_get::<Option<String>, _>("mls_group_id")
+                    .unwrap_or(None),
             )
         }))
     }
@@ -250,7 +252,10 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.and_then(|r| r.try_get::<Option<String>, _>("mls_group_id").unwrap_or(None)))
+        Ok(row.and_then(|r| {
+            r.try_get::<Option<String>, _>("mls_group_id")
+                .unwrap_or(None)
+        }))
     }
 
     // ==================== Group Invite Methods ====================
@@ -280,12 +285,21 @@ impl Db {
         .await?;
 
         let id = result.last_insert_rowid();
-        log::info!("Stored group invite {} from {} for group {} (user: {})", id, sender, group_id, me);
+        log::info!(
+            "Stored group invite {} from {} for group {} (user: {})",
+            id,
+            sender,
+            group_id,
+            me
+        );
         Ok(id)
     }
 
     /// Get pending group invites
-    pub async fn get_pending_invites(&self, me: &str) -> Result<Vec<(i64, String, Option<String>, String, String)>> {
+    pub async fn get_pending_invites(
+        &self,
+        me: &str,
+    ) -> Result<Vec<(i64, String, Option<String>, String, String)>> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_invites_{}", safe_name);
 
@@ -337,13 +351,10 @@ impl Db {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_invites_{}", safe_name);
 
-        sqlx::query(&format!(
-            "DELETE FROM {table} WHERE id = ?",
-            table = table
-        ))
-        .bind(invite_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(&format!("DELETE FROM {table} WHERE id = ?", table = table))
+            .bind(invite_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
@@ -375,7 +386,13 @@ impl Db {
         .await?;
 
         let id = result.last_insert_rowid();
-        log::info!("Stored join request {} from {} for group {} (user: {})", id, requester, group_id, me);
+        log::info!(
+            "Stored join request {} from {} for group {} (user: {})",
+            id,
+            requester,
+            group_id,
+            me
+        );
         Ok(id)
     }
 
@@ -447,7 +464,12 @@ impl Db {
     }
 
     /// Mark a join request as approved or rejected
-    pub async fn update_join_request_status(&self, me: &str, request_id: i64, status: &str) -> Result<()> {
+    pub async fn update_join_request_status(
+        &self,
+        me: &str,
+        request_id: i64,
+        status: &str,
+    ) -> Result<()> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("join_requests_{}", safe_name);
 
@@ -469,13 +491,10 @@ impl Db {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("join_requests_{}", safe_name);
 
-        sqlx::query(&format!(
-            "DELETE FROM {table} WHERE id = ?",
-            table = table
-        ))
-        .bind(request_id)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query(&format!("DELETE FROM {table} WHERE id = ?", table = table))
+            .bind(request_id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }

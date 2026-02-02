@@ -1,22 +1,25 @@
 //! Test-only MLS client following mls-rs basic_usage.rs pattern
 
 #[cfg(test)]
+#[allow(clippy::module_inception)]
 pub mod test_client {
     use crate::crypto::mls::test_storage::test_providers::TestStorageProvider;
-    use crate::crypto::mls::types::{EncryptedMessage, MlsMessageType, ConversationInfo, MlsGroupInfo, ConversationType};
+    use crate::crypto::mls::types::{
+        ConversationInfo, ConversationType, EncryptedMessage, MlsGroupInfo, MlsMessageType,
+    };
+    use anyhow::{anyhow, Result};
     use mls_rs::{
         client_builder::MlsConfig,
+        crypto::SignatureSecretKey,
+        error::MlsError,
+        group::ReceivedMessage,
         identity::{
             basic::{BasicCredential, BasicIdentityProvider},
             SigningIdentity,
         },
-        CipherSuite, Client, ExtensionList, MlsMessage, CryptoProvider, CipherSuiteProvider,
-        group::ReceivedMessage,
-        error::MlsError,
-        crypto::SignatureSecretKey,
+        CipherSuite, CipherSuiteProvider, Client, CryptoProvider, ExtensionList, MlsMessage,
     };
     use mls_rs_crypto_openssl::OpensslCryptoProvider;
-    use anyhow::{Result, anyhow};
 
     const TEST_CIPHER_SUITE: CipherSuite = CipherSuite::CURVE25519_AES128;
 
@@ -33,7 +36,9 @@ pub mod test_client {
 
             // Generate keys once and store them
             let crypto_provider = OpensslCryptoProvider::default();
-            let cipher_suite = crypto_provider.cipher_suite_provider(TEST_CIPHER_SUITE).unwrap();
+            let cipher_suite = crypto_provider
+                .cipher_suite_provider(TEST_CIPHER_SUITE)
+                .unwrap();
             let (secret, public) = cipher_suite.signature_key_generate().unwrap();
 
             let basic_identity = BasicCredential::new(identity.as_bytes().to_vec());
@@ -47,6 +52,7 @@ pub mod test_client {
             })
         }
 
+        #[allow(dead_code)]
         pub fn identity(&self) -> &str {
             &self.identity
         }
@@ -60,22 +66,34 @@ pub mod test_client {
                 .group_state_storage(self.storage.group_storage.clone())
                 .key_package_repo(self.storage.key_package_storage.clone())
                 .psk_store(self.storage.psk_storage.clone())
-                .signing_identity(self.signing_identity.clone(), self.secret_key.clone(), TEST_CIPHER_SUITE)
+                .signing_identity(
+                    self.signing_identity.clone(),
+                    self.secret_key.clone(),
+                    TEST_CIPHER_SUITE,
+                )
                 .build())
         }
 
         pub fn generate_key_package(&self) -> Result<Vec<u8>> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
             let key_package = client
                 .generate_key_package_message(Default::default(), Default::default(), None)
                 .map_err(|e| anyhow!("Failed to generate key package: {}", e))?;
 
-            key_package.to_bytes()
+            key_package
+                .to_bytes()
                 .map_err(|e| anyhow!("Failed to serialize key package: {}", e))
         }
 
-        pub async fn start_conversation(&self, recipient_key_package: &[u8]) -> Result<ConversationInfo> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+        pub async fn start_conversation(
+            &self,
+            recipient_key_package: &[u8],
+        ) -> Result<ConversationInfo> {
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // Parse recipient's key package
             let key_package_msg = MlsMessage::from_bytes(recipient_key_package)
@@ -89,24 +107,30 @@ pub mod test_client {
             let group_id = group.group_id().to_vec();
 
             // Add the recipient to the group
-            let commit_result = group.commit_builder()
+            let commit_result = group
+                .commit_builder()
                 .add_member(key_package_msg)
                 .map_err(|e| anyhow!("Failed to add member to group: {}", e))?
                 .build()
                 .map_err(|e| anyhow!("Failed to build commit: {}", e))?;
 
             // Apply the pending commit locally
-            group.apply_pending_commit()
+            group
+                .apply_pending_commit()
                 .map_err(|e| anyhow!("Failed to apply pending commit: {}", e))?;
 
             // Save the group state
-            group.write_to_storage()
+            group
+                .write_to_storage()
                 .map_err(|e| anyhow!("Failed to save group state: {}", e))?;
 
             // Extract welcome message for the recipient
             let welcome_message = if !commit_result.welcome_messages.is_empty() {
-                Some(commit_result.welcome_messages[0].to_bytes()
-                    .map_err(|e| anyhow!("Failed to serialize welcome message: {}", e))?)
+                Some(
+                    commit_result.welcome_messages[0]
+                        .to_bytes()
+                        .map_err(|e| anyhow!("Failed to serialize welcome message: {}", e))?,
+                )
             } else {
                 None
             };
@@ -124,7 +148,9 @@ pub mod test_client {
         }
 
         pub async fn join_conversation(&self, welcome_bytes: &[u8]) -> Result<ConversationInfo> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // Parse welcome message
             let welcome_message = MlsMessage::from_bytes(welcome_bytes)
@@ -138,7 +164,8 @@ pub mod test_client {
             let group_id = group.group_id().to_vec();
 
             // Save the joined group state
-            group.write_to_storage()
+            group
+                .write_to_storage()
                 .map_err(|e| anyhow!("Failed to save joined group state: {}", e))?;
 
             Ok(ConversationInfo {
@@ -153,23 +180,33 @@ pub mod test_client {
             })
         }
 
-        pub async fn encrypt_message(&self, conversation_id: &[u8], plaintext: &[u8]) -> Result<EncryptedMessage> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+        pub async fn encrypt_message(
+            &self,
+            conversation_id: &[u8],
+            plaintext: &[u8],
+        ) -> Result<EncryptedMessage> {
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // Load the group from storage
-            let mut group = client.load_group(conversation_id)
+            let mut group = client
+                .load_group(conversation_id)
                 .map_err(|e| anyhow!("Failed to load MLS group: {}", e))?;
 
             // Encrypt the message using MLS
-            let application_message = group.encrypt_application_message(plaintext, Default::default())
+            let application_message = group
+                .encrypt_application_message(plaintext, Default::default())
                 .map_err(|e| anyhow!("Failed to encrypt MLS message: {}", e))?;
 
             // Serialize the MLS message
-            let mls_message_bytes = application_message.to_bytes()
+            let mls_message_bytes = application_message
+                .to_bytes()
                 .map_err(|e| anyhow!("Failed to serialize MLS message: {}", e))?;
 
             // Save the group state after encryption
-            group.write_to_storage()
+            group
+                .write_to_storage()
                 .map_err(|e| anyhow!("Failed to save group state after encryption: {}", e))?;
 
             Ok(EncryptedMessage {
@@ -180,10 +217,13 @@ pub mod test_client {
         }
 
         pub async fn decrypt_message(&self, encrypted: &EncryptedMessage) -> Result<Vec<u8>> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // Load the group from storage
-            let mut group = client.load_group(&encrypted.conversation_id)
+            let mut group = client
+                .load_group(&encrypted.conversation_id)
                 .map_err(|e| anyhow!("Failed to load MLS group: {}", e))?;
 
             // Parse the MLS message
@@ -191,29 +231,36 @@ pub mod test_client {
                 .map_err(|e| anyhow!("Failed to parse MLS message: {}", e))?;
 
             // Process the incoming message and decrypt using MLS
-            let received_message = group.process_incoming_message(mls_message)
+            let received_message = group
+                .process_incoming_message(mls_message)
                 .map_err(|e| anyhow!("Failed to process incoming MLS message: {}", e))?;
 
             // Save the group state after processing
-            group.write_to_storage()
+            group
+                .write_to_storage()
                 .map_err(|e| anyhow!("Failed to save group state after decryption: {}", e))?;
 
             // Extract the plaintext from the processed message
             match received_message {
-                ReceivedMessage::ApplicationMessage(app_msg) => {
-                    Ok(app_msg.data().to_vec())
-                }
-                _ => {
-                    Err(anyhow!("Expected application message, got different message type"))
-                }
+                ReceivedMessage::ApplicationMessage(app_msg) => Ok(app_msg.data().to_vec()),
+                _ => Err(anyhow!(
+                    "Expected application message, got different message type"
+                )),
             }
         }
 
-        pub async fn add_member(&self, conversation_id: &[u8], key_package_bytes: &[u8]) -> Result<EncryptedMessage> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+        pub async fn add_member(
+            &self,
+            conversation_id: &[u8],
+            key_package_bytes: &[u8],
+        ) -> Result<EncryptedMessage> {
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // Load the existing group
-            let mut group = client.load_group(conversation_id)
+            let mut group = client
+                .load_group(conversation_id)
                 .map_err(|e| anyhow!("Failed to load MLS group: {}", e))?;
 
             // Parse the new member's key package
@@ -221,22 +268,27 @@ pub mod test_client {
                 .map_err(|e| anyhow!("Failed to parse key package: {}", e))?;
 
             // Create a commit that adds the new member
-            let commit_result = group.commit_builder()
+            let commit_result = group
+                .commit_builder()
                 .add_member(key_package)
                 .map_err(|e| anyhow!("Failed to add member to group: {}", e))?
                 .build()
                 .map_err(|e| anyhow!("Failed to build add member commit: {}", e))?;
 
             // Apply the pending commit locally
-            group.apply_pending_commit()
+            group
+                .apply_pending_commit()
                 .map_err(|e| anyhow!("Failed to apply pending commit: {}", e))?;
 
             // Save the updated group state
-            group.write_to_storage()
+            group
+                .write_to_storage()
                 .map_err(|e| anyhow!("Failed to save updated group state: {}", e))?;
 
             // Convert the commit to bytes for sending to other members
-            let commit_bytes = commit_result.commit_message.to_bytes()
+            let commit_bytes = commit_result
+                .commit_message
+                .to_bytes()
                 .map_err(|e| anyhow!("Failed to serialize commit message: {}", e))?;
 
             Ok(EncryptedMessage {
@@ -247,10 +299,13 @@ pub mod test_client {
         }
 
         pub async fn export_group_state(&self, conversation_id: &[u8]) -> Result<Vec<u8>> {
-            let client = self.make_client().map_err(|e| anyhow!("Failed to create client: {}", e))?;
+            let client = self
+                .make_client()
+                .map_err(|e| anyhow!("Failed to create client: {}", e))?;
 
             // For test client, we'll export the raw group state
-            let _group = client.load_group(conversation_id)
+            let _group = client
+                .load_group(conversation_id)
                 .map_err(|e| anyhow!("Failed to load MLS group: {}", e))?;
 
             // This is a simplified export - in real implementation we'd serialize the entire group state

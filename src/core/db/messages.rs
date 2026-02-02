@@ -3,7 +3,7 @@
 //! This module contains methods for saving, loading, and managing messages
 //! including pending MLS messages for epoch-aware buffering.
 
-use super::{Db, sanitize_table_name, PendingMlsMessage, GroupMessage};
+use super::{sanitize_table_name, Db, GroupMessage, PendingMlsMessage};
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use sqlx::Row;
@@ -104,7 +104,10 @@ impl Db {
     }
 
     /// Load complete chat history for a user (all contacts and their messages)
-    pub async fn load_chat_history(&self, user: &str) -> Result<Vec<(String, Vec<(bool, String, chrono::DateTime<chrono::Utc>)>)>> {
+    pub async fn load_chat_history(
+        &self,
+        user: &str,
+    ) -> Result<Vec<(String, Vec<(bool, String, chrono::DateTime<chrono::Utc>)>)>> {
         // Get all contacts for this user
         let contacts = self.load_contacts(user).await?;
 
@@ -290,12 +293,19 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| r.try_get::<i64, _>("last_seen_id").unwrap_or(0)).unwrap_or(0))
+        Ok(row
+            .map(|r| r.try_get::<i64, _>("last_seen_id").unwrap_or(0))
+            .unwrap_or(0))
     }
 
     /// Update the group cursor after fetching messages
     #[allow(dead_code)] // Part of public API for group message management
-    pub async fn update_group_cursor(&self, me: &str, group_server: &str, last_seen_id: i64) -> Result<()> {
+    pub async fn update_group_cursor(
+        &self,
+        me: &str,
+        group_server: &str,
+        last_seen_id: i64,
+    ) -> Result<()> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_cursor_{}", safe_name);
 
@@ -313,7 +323,12 @@ impl Db {
 
     /// Store fetched group messages
     #[allow(dead_code)] // Part of public API for group message management
-    pub async fn store_group_messages(&self, me: &str, group_server: &str, messages: Vec<GroupMessage>) -> Result<()> {
+    pub async fn store_group_messages(
+        &self,
+        me: &str,
+        group_server: &str,
+        messages: Vec<GroupMessage>,
+    ) -> Result<()> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_messages_{}", safe_name);
 
@@ -338,7 +353,11 @@ impl Db {
 
     /// Load group messages for display
     #[allow(dead_code)] // Part of public API for group message management
-    pub async fn load_group_messages(&self, me: &str, group_server: &str) -> Result<Vec<GroupMessage>> {
+    pub async fn load_group_messages(
+        &self,
+        me: &str,
+        group_server: &str,
+    ) -> Result<Vec<GroupMessage>> {
         let safe_name = sanitize_table_name(me)?;
         let table = format!("group_messages_{}", safe_name);
 

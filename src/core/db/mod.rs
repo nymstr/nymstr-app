@@ -7,15 +7,15 @@
 //! - `mls`: MLS state and credential operations
 //! - `group`: Group membership and server operations
 
-mod user;
 mod contacts;
+mod group;
 mod messages;
 mod mls;
-mod group;
+mod user;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 use std::{fs, path::Path};
 
 /// Represents a pending MLS message waiting for epoch sync
@@ -107,11 +107,13 @@ pub(crate) fn sanitize_table_name(username: &str) -> Result<String> {
 
     // Only allow alphanumeric characters and underscores
     if !username.chars().all(|c| c.is_alphanumeric() || c == '_') {
-        return Err(anyhow!("Invalid characters in username. Only alphanumeric characters and underscores allowed."));
+        return Err(anyhow!(
+            "Invalid characters in username. Only alphanumeric characters and underscores allowed."
+        ));
     }
 
     // Ensure it doesn't start with a number (SQLite table name restriction)
-    if username.chars().next().map_or(false, |c| c.is_numeric()) {
+    if username.chars().next().is_some_and(|c| c.is_numeric()) {
         return Err(anyhow!("Username cannot start with a number"));
     }
 
@@ -183,7 +185,7 @@ mod tests {
         db.save_message("bob", "alice", true, "hello", ts).await?;
         let msgs = db.load_messages("bob", "alice").await?;
         assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0].0, true);
+        assert!(msgs[0].0);
         assert_eq!(msgs[0].1, "hello".to_string());
         Ok(())
     }

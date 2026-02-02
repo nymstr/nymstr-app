@@ -18,7 +18,7 @@ impl User {
             online: false,
         }
     }
-    
+
     pub fn with_display_name(username: &str, display_name: &str) -> Self {
         Self {
             id: username.to_string(),
@@ -27,7 +27,7 @@ impl User {
             online: false,
         }
     }
-    
+
     pub fn set_online(&mut self, online: bool) {
         self.online = online;
     }
@@ -59,10 +59,10 @@ mod tests {
     fn test_user_set_online() {
         let mut user = User::new("charlie");
         assert!(!user.online);
-        
+
         user.set_online(true);
         assert!(user.online);
-        
+
         user.set_online(false);
         assert!(!user.online);
     }
@@ -74,10 +74,10 @@ mod tests {
         assert_eq!(user.username, "dave");
         assert_eq!(user.display_name, "dave");
         assert!(!user.online);
-        
+
         user.display_name = "David".to_string();
         user.online = true;
-        
+
         assert_eq!(user.id, "dave");
         assert_eq!(user.username, "dave");
         assert_eq!(user.display_name, "David");
@@ -88,7 +88,7 @@ mod tests {
     fn test_user_clone() {
         let user1 = User::new("eve");
         let user2 = user1.clone();
-        
+
         assert_eq!(user1, user2);
         assert_eq!(user1.id, user2.id);
         assert_eq!(user1.username, user2.username);
@@ -101,7 +101,7 @@ mod tests {
         let user1 = User::new("frank");
         let user2 = User::new("frank");
         let user3 = User::new("grace");
-        
+
         assert_eq!(user1, user2);
         assert_ne!(user1, user3);
     }
@@ -150,10 +150,10 @@ mod tests {
             display_name: "Original Name".to_string(),
             online: false,
         };
-        
+
         user.display_name = "Modified Name".to_string();
         user.online = true;
-        
+
         assert_eq!(user.id, "id1");
         assert_eq!(user.username, "username1");
         assert_eq!(user.display_name, "Modified Name");
@@ -168,21 +168,21 @@ mod tests {
             display_name: "Test User".to_string(),
             online: true,
         };
-        
+
         let user2 = User {
             id: "test".to_string(),
             username: "test".to_string(),
             display_name: "Test User".to_string(),
             online: true,
         };
-        
+
         let user3 = User {
             id: "test".to_string(),
             username: "test".to_string(),
             display_name: "Test User".to_string(),
             online: false,
         };
-        
+
         assert_eq!(user1, user2);
         assert_ne!(user1, user3);
     }
@@ -191,7 +191,7 @@ mod tests {
     fn test_user_different_id_and_username() {
         let mut user = User::new("initial");
         user.id = "different_id".to_string();
-        
+
         assert_eq!(user.id, "different_id");
         assert_eq!(user.username, "initial");
         assert_eq!(user.display_name, "initial");

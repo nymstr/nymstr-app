@@ -8,10 +8,10 @@ pub mod cli;
 pub mod core;
 pub mod crypto;
 pub mod event;
+pub mod log_buffer;
 pub mod model;
 pub mod screen;
 pub mod ui;
-pub mod log_buffer;
 
 #[cfg(test)]
 pub mod test_pgp;

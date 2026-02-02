@@ -5,15 +5,15 @@
 
 #![allow(dead_code)] // Many methods are part of the public API for conversation management
 
+use super::epoch_buffer::EpochAwareBuffer;
+use super::types::{MlsCredential, MlsGroupInfoPublic, MlsWelcome};
+use super::MlsClient;
 use crate::core::{db::Db, mixnet_client::MixnetService};
 use crate::crypto::{Crypto, SecurePassphrase};
-use super::MlsClient;
-use super::epoch_buffer::EpochAwareBuffer;
-use super::types::{MlsWelcome, MlsCredential, MlsGroupInfoPublic};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use base64::Engine;
-use log::{info, warn, debug};
-use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use log::{debug, info, warn};
+use pgp::composed::{SignedPublicKey, SignedSecretKey};
 use std::sync::Arc;
 
 /// Type alias for Arc-wrapped PGP secret key to reduce expensive cloning
@@ -79,7 +79,11 @@ impl MlsConversationManager {
     }
 
     /// Handle incoming key package request for MLS handshake
-    pub async fn handle_key_package_request(&mut self, sender: &str, sender_key_package: &str) -> Result<()> {
+    pub async fn handle_key_package_request(
+        &mut self,
+        sender: &str,
+        sender_key_package: &str,
+    ) -> Result<()> {
         info!("Handling key package request from: {}", sender);
 
         // Create MLS client for this conversation
@@ -97,19 +101,31 @@ impl MlsConversationManager {
         };
 
         // Sign our key package for authenticity
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, &our_key_package, passphrase)?
         } else {
             return Err(anyhow!("PGP keys not available for signing"));
         };
 
         // Convert key package to base64 for transmission
-        let our_key_package_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package);
-        let sender_key_package_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, sender_key_package.as_bytes());
+        let our_key_package_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package);
+        let sender_key_package_b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            sender_key_package.as_bytes(),
+        );
 
         // Send key package response back to sender
         self.service
-            .send_key_package_response(user, sender, &sender_key_package_b64, &our_key_package_b64, &signature)
+            .send_key_package_response(
+                user,
+                sender,
+                &sender_key_package_b64,
+                &our_key_package_b64,
+                &signature,
+            )
             .await?;
 
         info!("Sent key package response to: {}", sender);
@@ -117,14 +133,23 @@ impl MlsConversationManager {
     }
 
     /// Handle incoming group welcome message
-    pub async fn handle_group_welcome(&mut self, sender: &str, welcome_message: &str, group_id: &str) -> Result<()> {
-        info!("Handling group welcome from: {} for group: {}", sender, group_id);
+    pub async fn handle_group_welcome(
+        &mut self,
+        sender: &str,
+        welcome_message: &str,
+        group_id: &str,
+    ) -> Result<()> {
+        info!(
+            "Handling group welcome from: {} for group: {}",
+            sender, group_id
+        );
 
         // Create MLS client for processing the welcome
         let client = self.create_mls_client().await?;
 
         // Decode and process the welcome message
-        let welcome_bytes = base64::engine::general_purpose::STANDARD.decode(welcome_message)
+        let welcome_bytes = base64::engine::general_purpose::STANDARD
+            .decode(welcome_message)
             .map_err(|e| anyhow!("Failed to decode welcome message: {}", e))?;
 
         // Join the MLS group using the welcome message
@@ -133,9 +158,13 @@ impl MlsConversationManager {
         info!("Successfully joined MLS group: {}", group_id);
 
         // Store group state in database
-        let group_state = client.export_group_state(&conversation_info.conversation_id).await?;
+        let group_state = client
+            .export_group_state(&conversation_info.conversation_id)
+            .await?;
         let user = self.current_user.as_deref().unwrap_or("");
-        self.db.save_mls_group_state(user, group_id, &group_state).await?;
+        self.db
+            .save_mls_group_state(user, group_id, &group_state)
+            .await?;
 
         // Send confirmation back to sender
         let user = self.current_user.as_deref().unwrap_or("");
@@ -158,14 +187,17 @@ impl MlsConversationManager {
         let our_key_package = client.generate_key_package()?;
 
         // Sign our key package for authenticity
-        let signature = if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
+        let signature = if let (Some(secret_key), Some(passphrase)) =
+            (&self.pgp_secret_key, &self.pgp_passphrase)
+        {
             Crypto::pgp_sign_detached_secure(secret_key, &our_key_package, passphrase)?
         } else {
             return Err(anyhow!("PGP keys not available for signing"));
         };
 
         // Convert key package to base64 for transmission
-        let our_key_package_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package);
+        let our_key_package_b64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &our_key_package);
         let user = self.current_user.as_deref().unwrap_or("");
 
         // Send key package request to recipient
@@ -180,20 +212,34 @@ impl MlsConversationManager {
     /// Create an MLS client instance using existing PGP keys
     /// Uses Arc::clone for cheap reference counting instead of expensive key cloning
     async fn create_mls_client(&self) -> Result<MlsClient> {
-        let user = self.current_user.as_deref()
+        let user = self
+            .current_user
+            .as_deref()
             .ok_or_else(|| anyhow!("No current user set"))?;
 
-        let secret_key = self.pgp_secret_key.as_ref()
+        let secret_key = self
+            .pgp_secret_key
+            .as_ref()
             .ok_or_else(|| anyhow!("PGP secret key not available"))?;
 
-        let public_key = self.pgp_public_key.as_ref()
+        let public_key = self
+            .pgp_public_key
+            .as_ref()
             .ok_or_else(|| anyhow!("PGP public key not available"))?;
 
-        let passphrase = self.pgp_passphrase.as_ref()
+        let passphrase = self
+            .pgp_passphrase
+            .as_ref()
             .ok_or_else(|| anyhow!("PGP passphrase not available"))?;
 
         // Create MLS client with existing PGP keys (Arc::clone is cheap - just increments ref count)
-        MlsClient::new(user, Arc::clone(secret_key), Arc::clone(public_key), self.db.clone(), passphrase)
+        MlsClient::new(
+            user,
+            Arc::clone(secret_key),
+            Arc::clone(public_key),
+            self.db.clone(),
+            passphrase,
+        )
     }
 
     /// Update manager state
@@ -232,29 +278,50 @@ impl MlsConversationManager {
     }
 
     /// Handle MLS protocol messages - centralized routing
-    pub async fn handle_mls_protocol_message(&mut self, envelope: &crate::core::messages::MixnetMessage) -> Result<(String, String)> {
+    pub async fn handle_mls_protocol_message(
+        &mut self,
+        envelope: &crate::core::messages::MixnetMessage,
+    ) -> Result<(String, String)> {
         match envelope.action.as_str() {
             "keyPackageRequest" => {
-                if let Ok(sender_key_package) = crate::crypto::MessageCrypto::extract_key_package(envelope) {
-                    self.handle_key_package_request(&envelope.sender, &sender_key_package).await?;
+                if let Ok(sender_key_package) =
+                    crate::crypto::MessageCrypto::extract_key_package(envelope)
+                {
+                    self.handle_key_package_request(&envelope.sender, &sender_key_package)
+                        .await?;
                 }
                 Ok((String::new(), String::new())) // No chat message to return
             }
             "groupWelcome" => {
-                if let Ok((welcome_message, group_id)) = crate::crypto::MessageCrypto::extract_group_welcome(envelope) {
-                    self.handle_group_welcome(&envelope.sender, &welcome_message, &group_id).await?;
+                if let Ok((welcome_message, group_id)) =
+                    crate::crypto::MessageCrypto::extract_group_welcome(envelope)
+                {
+                    self.handle_group_welcome(&envelope.sender, &welcome_message, &group_id)
+                        .await?;
                 }
                 Ok((String::new(), String::new())) // No chat message to return
             }
             "send" | "incomingMessage" => {
                 // Handle MLS chat messages with epoch-aware buffering
-                if let Ok((conversation_id, mls_message)) = crate::crypto::MessageCrypto::extract_mls_message(envelope) {
+                if let Ok((conversation_id, mls_message)) =
+                    crate::crypto::MessageCrypto::extract_mls_message(envelope)
+                {
                     // Use buffered processing to handle out-of-order messages
-                    match self.process_incoming_message_buffered(&conversation_id, &envelope.sender, &mls_message).await {
+                    match self
+                        .process_incoming_message_buffered(
+                            &conversation_id,
+                            &envelope.sender,
+                            &mls_message,
+                        )
+                        .await
+                    {
                         Ok(Some((sender, message))) => Ok((sender, message)),
                         Ok(None) => {
                             // Message was buffered for later - return empty
-                            log::info!("Message buffered for conversation {} (epoch mismatch)", conversation_id);
+                            log::info!(
+                                "Message buffered for conversation {} (epoch mismatch)",
+                                conversation_id
+                            );
                             Ok((String::new(), String::new()))
                         }
                         Err(e) => {
@@ -275,11 +342,21 @@ impl MlsConversationManager {
     }
 
     /// Handle incoming MLS chat messages
-    pub async fn handle_mls_chat_message(&mut self, sender: &str, conversation_id: &str, mls_message: &str) -> Result<(String, String)> {
-        log::info!("Processing MLS chat message from {} in conversation {}", sender, conversation_id);
+    pub async fn handle_mls_chat_message(
+        &mut self,
+        sender: &str,
+        conversation_id: &str,
+        mls_message: &str,
+    ) -> Result<(String, String)> {
+        log::info!(
+            "Processing MLS chat message from {} in conversation {}",
+            sender,
+            conversation_id
+        );
 
         // Decode the base64 MLS message
-        let mls_message_bytes = base64::engine::general_purpose::STANDARD.decode(mls_message)
+        let mls_message_bytes = base64::engine::general_purpose::STANDARD
+            .decode(mls_message)
             .map_err(|e| anyhow!("Failed to decode MLS message: {}", e))?;
 
         // Parse the MLS message
@@ -287,21 +364,25 @@ impl MlsConversationManager {
             .map_err(|e| anyhow!("Failed to parse MLS message: {}", e))?;
 
         // Decode conversation ID
-        let conversation_id_bytes = base64::engine::general_purpose::STANDARD.decode(conversation_id)
+        let conversation_id_bytes = base64::engine::general_purpose::STANDARD
+            .decode(conversation_id)
             .map_err(|e| anyhow!("Failed to decode conversation ID: {}", e))?;
 
         // Create MLS client and load the group
         let mls_client_wrapper = self.create_mls_client().await?;
         let client = mls_client_wrapper.create_client()?;
-        let mut group = client.load_group(&conversation_id_bytes)
+        let mut group = client
+            .load_group(&conversation_id_bytes)
             .map_err(|e| anyhow!("Failed to load MLS group: {}", e))?;
 
         // Process the incoming message
-        let processed = group.process_incoming_message(mls_msg)
+        let processed = group
+            .process_incoming_message(mls_msg)
             .map_err(|e| anyhow!("Failed to process MLS message: {}", e))?;
 
         // Save group state
-        group.write_to_storage()
+        group
+            .write_to_storage()
             .map_err(|e| anyhow!("Failed to save group state: {}", e))?;
 
         // Extract decrypted content if it's an application message
@@ -341,7 +422,10 @@ impl MlsConversationManager {
         match self.try_process_mls_message(conv_id, mls_message_b64).await {
             Ok(result) => {
                 // Message processed successfully
-                info!("Successfully processed MLS message from {} in {}", sender, conv_id);
+                info!(
+                    "Successfully processed MLS message from {} in {}",
+                    sender, conv_id
+                );
 
                 // After successful processing, try to process any buffered messages
                 let (processed, failed) = self.process_buffered_messages(conv_id).await?;
@@ -494,7 +578,10 @@ impl MlsConversationManager {
             }
 
             // Try to process the message
-            match self.try_process_mls_message(conv_id, &msg.mls_message_b64).await {
+            match self
+                .try_process_mls_message(conv_id, &msg.mls_message_b64)
+                .await
+            {
                 Ok(_) => {
                     self.epoch_buffer
                         .mark_processed(conv_id, &msg.mls_message_b64)
@@ -507,7 +594,8 @@ impl MlsConversationManager {
                 }
                 Err(e) if self.is_epoch_error(&e) => {
                     // Still can't process - increment retry count
-                    let new_count = self.epoch_buffer
+                    let new_count = self
+                        .epoch_buffer
                         .increment_retry(conv_id, &msg.mls_message_b64)
                         .await?;
                     debug!(
@@ -517,7 +605,8 @@ impl MlsConversationManager {
                 }
                 Err(e) => {
                     // Non-epoch error
-                    let new_count = self.epoch_buffer
+                    let new_count = self
+                        .epoch_buffer
                         .increment_retry(conv_id, &msg.mls_message_b64)
                         .await?;
                     warn!(
@@ -634,25 +723,29 @@ impl MlsConversationManager {
         }
 
         // Store group membership info
-        self.db.add_group_membership(
-            user,
-            &welcome.group_id,
-            &welcome.sender,
-            Some(&sender_credential.fingerprint_hex()),
-            true, // credential verified
-            "admin", // the inviter is admin
-        ).await?;
+        self.db
+            .add_group_membership(
+                user,
+                &welcome.group_id,
+                &welcome.sender,
+                Some(&sender_credential.fingerprint_hex()),
+                true,    // credential verified
+                "admin", // the inviter is admin
+            )
+            .await?;
 
         // Add ourselves as a member
         let own_fingerprint = mls_client.pgp_fingerprint()?;
-        self.db.add_group_membership(
-            user,
-            &welcome.group_id,
-            user,
-            Some(&hex::encode(&own_fingerprint)),
-            true,
-            "member",
-        ).await?;
+        self.db
+            .add_group_membership(
+                user,
+                &welcome.group_id,
+                user,
+                Some(&hex::encode(&own_fingerprint)),
+                true,
+                "member",
+            )
+            .await?;
 
         info!(
             "Successfully joined group {} via welcome from {}",
@@ -694,31 +787,33 @@ impl MlsConversationManager {
             .map_err(|e| anyhow!("Invalid key package base64: {}", e))?;
 
         // Add the member to the group and get Welcome + Commit
-        let add_result = mls_client.add_member_to_group(conversation_id, &key_package_bytes).await?;
+        let add_result = mls_client
+            .add_member_to_group(conversation_id, &key_package_bytes)
+            .await?;
 
         // Store group membership
         let user = self.current_user.as_deref().unwrap_or("");
-        self.db.add_group_membership(
-            user,
-            conversation_id,
-            member_username,
-            None, // fingerprint will be updated when they join
-            false, // not yet verified
-            "member",
-        ).await?;
+        self.db
+            .add_group_membership(
+                user,
+                conversation_id,
+                member_username,
+                None,  // fingerprint will be updated when they join
+                false, // not yet verified
+                "member",
+            )
+            .await?;
 
         // Sign the welcome message for authenticity
         if let (Some(secret_key), Some(passphrase)) = (&self.pgp_secret_key, &self.pgp_passphrase) {
             let welcome_bytes = add_result.welcome.to_bytes()?;
-            let signature = Crypto::pgp_sign_detached_secure(secret_key, &welcome_bytes, passphrase)?;
+            let signature =
+                Crypto::pgp_sign_detached_secure(secret_key, &welcome_bytes, passphrase)?;
 
             // Send the welcome via mixnet
-            self.service.send_mls_welcome(
-                user,
-                member_username,
-                &add_result.welcome,
-                &signature,
-            ).await?;
+            self.service
+                .send_mls_welcome(user, member_username, &add_result.welcome, &signature)
+                .await?;
         }
 
         info!(
@@ -746,19 +841,26 @@ impl MlsConversationManager {
         let user = self.current_user.as_deref().unwrap_or("");
         let own_fingerprint = mls_client.pgp_fingerprint()?;
 
-        self.db.add_group_membership(
-            user,
-            &group_info.group_id,
-            user,
-            Some(&hex::encode(&own_fingerprint)),
-            true,
-            "admin",
-        ).await?;
+        self.db
+            .add_group_membership(
+                user,
+                &group_info.group_id,
+                user,
+                Some(&hex::encode(&own_fingerprint)),
+                true,
+                "admin",
+            )
+            .await?;
 
         // Store the group info for later reference
-        self.db.store_group_info(user, &group_info.group_id, &group_info).await?;
+        self.db
+            .store_group_info(user, &group_info.group_id, &group_info)
+            .await?;
 
-        info!("Created group: {} with id {}", group_name, group_info.group_id);
+        info!(
+            "Created group: {} with id {}",
+            group_name, group_info.group_id
+        );
 
         Ok(group_info)
     }
@@ -805,7 +907,10 @@ impl MlsConversationManager {
                     info!("Processed pending welcome for group {}", stored.group_id);
                 }
                 Err(e) => {
-                    warn!("Failed to process welcome for group {}: {}", stored.group_id, e);
+                    warn!(
+                        "Failed to process welcome for group {}: {}",
+                        stored.group_id, e
+                    );
                 }
             }
         }
@@ -820,7 +925,10 @@ impl MlsConversationManager {
     }
 
     /// Get members of a group
-    pub async fn get_group_members(&self, group_id: &str) -> Result<Vec<crate::core::db::GroupMember>> {
+    pub async fn get_group_members(
+        &self,
+        group_id: &str,
+    ) -> Result<Vec<crate::core::db::GroupMember>> {
         let user = self.current_user.as_deref().unwrap_or("");
         self.db.get_group_members(user, group_id).await
     }
@@ -828,7 +936,6 @@ impl MlsConversationManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     // Note: These would need actual test implementations with mock services
 
     #[test]

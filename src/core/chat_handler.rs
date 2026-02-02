@@ -3,10 +3,10 @@
 //! Handles regular chat messages and handshakes.
 
 use crate::core::db::Db;
-use crate::crypto::{MessageCrypto, Crypto};
-use anyhow::{Result, anyhow};
+use crate::crypto::{Crypto, MessageCrypto};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
-use log::{info, warn, error};
+use log::{error, info, warn};
 use std::sync::Arc;
 
 /// Result of processing a chat message
@@ -31,14 +31,14 @@ pub struct ChatHandler {
 
 impl ChatHandler {
     pub fn new(db: Arc<Db>, current_user: Option<String>) -> Self {
-        Self {
-            db,
-            current_user,
-        }
+        Self { db, current_user }
     }
 
     /// Process a chat message (send/incomingMessage)
-    pub async fn handle_chat_message(&self, envelope: &crate::core::messages::MixnetMessage) -> Result<ChatResult> {
+    pub async fn handle_chat_message(
+        &self,
+        envelope: &crate::core::messages::MixnetMessage,
+    ) -> Result<ChatResult> {
         // Look up sender's public key for verification
         let sender_public_key = match self.db.get_user(&envelope.sender).await {
             Ok(Some((_username, public_key_pem))) => {
@@ -55,23 +55,43 @@ impl ChatHandler {
                 None
             }
             Err(e) => {
-                error!("Database error looking up sender {}: {}", envelope.sender, e);
+                error!(
+                    "Database error looking up sender {}: {}",
+                    envelope.sender, e
+                );
                 None
             }
         };
 
         // Decrypt and verify the message
-        let verified = MessageCrypto::decrypt_and_verify_chat_message(envelope, sender_public_key.as_ref())?;
+        let verified =
+            MessageCrypto::decrypt_and_verify_chat_message(envelope, sender_public_key.as_ref())?;
 
         // SECURITY: Reject messages with invalid signatures
         if !verified.signature_valid {
-            error!("Message from {} rejected: signature verification failed", envelope.sender);
-            return Err(anyhow!("Message from {} rejected: signature verification failed", envelope.sender));
+            error!(
+                "Message from {} rejected: signature verification failed",
+                envelope.sender
+            );
+            return Err(anyhow!(
+                "Message from {} rejected: signature verification failed",
+                envelope.sender
+            ));
         }
 
         // Save message to database
         if let Some(current_user) = &self.current_user {
-            if let Err(e) = self.db.save_message(current_user, &verified.sender, false, &verified.content, Utc::now()).await {
+            if let Err(e) = self
+                .db
+                .save_message(
+                    current_user,
+                    &verified.sender,
+                    false,
+                    &verified.content,
+                    Utc::now(),
+                )
+                .await
+            {
                 error!("Failed to save message to database: {}", e);
             }
         }
@@ -83,7 +103,10 @@ impl ChatHandler {
     }
 
     /// Process a handshake message
-    pub async fn handle_handshake(&self, envelope: &crate::core::messages::MixnetMessage) -> Result<ChatResult> {
+    pub async fn handle_handshake(
+        &self,
+        envelope: &crate::core::messages::MixnetMessage,
+    ) -> Result<ChatResult> {
         let nym_address = MessageCrypto::extract_handshake_info(envelope)?;
         info!("Received handshake with nym address: {}", nym_address);
 
@@ -100,9 +123,12 @@ impl ChatHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
-    fn create_test_envelope(action: &str, payload: serde_json::Value) -> crate::core::messages::MixnetMessage {
+    #[allow(dead_code)]
+    fn create_test_envelope(
+        action: &str,
+        payload: serde_json::Value,
+    ) -> crate::core::messages::MixnetMessage {
         crate::core::messages::MixnetMessage {
             message_type: "message".to_string(),
             action: action.to_string(),

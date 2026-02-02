@@ -2,11 +2,11 @@ use crate::app::App;
 use crate::model::message::Message;
 use crate::screen::chat::ChatSection;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    Frame,
 };
 use serde::de::Error;
 use serde_json::Value;

@@ -2,13 +2,13 @@
 
 #![allow(dead_code)] // Many methods are part of the public API for key package management
 
-use anyhow::{Result, anyhow};
-use base64::Engine;
-use std::collections::HashMap;
-use crate::core::db::Db;
 use super::client::MlsClient;
-use super::types::{MlsCredential, CredentialValidationResult};
+use super::types::{CredentialValidationResult, MlsCredential};
+use crate::core::db::Db;
+use anyhow::{anyhow, Result};
+use base64::Engine;
 use mls_rs::CipherSuite;
+use std::collections::HashMap;
 
 /// Supported cipher suites for key packages
 const SUPPORTED_CIPHER_SUITES: &[CipherSuite] = &[
@@ -62,14 +62,18 @@ impl KeyPackageManager {
     ) -> Result<String> {
         // Validate the credential before generating the key package
         if !credential.is_valid() {
-            return Err(anyhow!("Cannot generate key package with invalid or expired credential"));
+            return Err(anyhow!(
+                "Cannot generate key package with invalid or expired credential"
+            ));
         }
 
         // Generate the base key package
         let key_package_b64 = self.generate_key_package(mls_client)?;
 
         // Store the credential association
-        let mut cache = self.credential_cache.lock()
+        let mut cache = self
+            .credential_cache
+            .lock()
             .map_err(|e| anyhow!("Failed to acquire credential_cache lock: {}", e))?;
         cache.insert(credential.username.clone(), credential.clone());
 
@@ -87,7 +91,8 @@ impl KeyPackageManager {
         log::info!("Validating key package...");
 
         // Decode from base64
-        let key_package_bytes = base64::engine::general_purpose::STANDARD.decode(key_package_b64)
+        let key_package_bytes = base64::engine::general_purpose::STANDARD
+            .decode(key_package_b64)
             .map_err(|e| anyhow!("Invalid base64 key package: {}", e))?;
 
         // Check minimum size (key packages should be substantial)
@@ -112,7 +117,10 @@ impl KeyPackageManager {
         // Check cipher suite is supported
         let cipher_suite = key_package.cipher_suite;
         if !SUPPORTED_CIPHER_SUITES.contains(&cipher_suite) {
-            log::warn!("Unsupported cipher suite in key package: {:?}", cipher_suite);
+            log::warn!(
+                "Unsupported cipher suite in key package: {:?}",
+                cipher_suite
+            );
             return Err(anyhow!("Unsupported cipher suite: {:?}", cipher_suite));
         }
         log::debug!("Key package cipher suite: {:?} - OK", cipher_suite);
@@ -126,17 +134,21 @@ impl KeyPackageManager {
     }
 
     /// Validate key package with detailed logging and return validation details
-    pub fn validate_key_package_detailed(&self, key_package_b64: &str) -> Result<KeyPackageValidationResult> {
+    pub fn validate_key_package_detailed(
+        &self,
+        key_package_b64: &str,
+    ) -> Result<KeyPackageValidationResult> {
         let mut result = KeyPackageValidationResult::default();
 
         // Decode from base64
-        let key_package_bytes = match base64::engine::general_purpose::STANDARD.decode(key_package_b64) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                result.errors.push(format!("Invalid base64: {}", e));
-                return Ok(result);
-            }
-        };
+        let key_package_bytes =
+            match base64::engine::general_purpose::STANDARD.decode(key_package_b64) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    result.errors.push(format!("Invalid base64: {}", e));
+                    return Ok(result);
+                }
+            };
         result.size_bytes = key_package_bytes.len();
 
         // Parse as MLS message
@@ -152,7 +164,9 @@ impl KeyPackageManager {
         let key_package = match key_package_msg.into_key_package() {
             Some(kp) => kp,
             None => {
-                result.errors.push("Message is not a key package".to_string());
+                result
+                    .errors
+                    .push("Message is not a key package".to_string());
                 return Ok(result);
             }
         };
@@ -161,7 +175,9 @@ impl KeyPackageManager {
         let cipher_suite = key_package.cipher_suite;
         result.cipher_suite = Some(format!("{:?}", cipher_suite));
         if !SUPPORTED_CIPHER_SUITES.contains(&cipher_suite) {
-            result.warnings.push(format!("Unsupported cipher suite: {:?}", cipher_suite));
+            result
+                .warnings
+                .push(format!("Unsupported cipher suite: {:?}", cipher_suite));
         }
 
         result.valid = result.errors.is_empty();
@@ -211,7 +227,9 @@ impl KeyPackageManager {
             cred_result.pgp_binding_verified = true;
             log::info!("PGP binding verified for user: {}", credential.username);
         } else {
-            result.errors.push("PGP key binding verification failed".to_string());
+            result
+                .errors
+                .push("PGP key binding verification failed".to_string());
             cred_result.pgp_binding_verified = false;
             result.valid = false;
         }
@@ -220,7 +238,9 @@ impl KeyPackageManager {
         if !credential.mls_signature_key.is_empty() {
             cred_result.has_signature_key = true;
         } else {
-            result.errors.push("Credential missing MLS signature key".to_string());
+            result
+                .errors
+                .push("Credential missing MLS signature key".to_string());
             cred_result.has_signature_key = false;
             result.valid = false;
         }
@@ -245,7 +265,9 @@ impl KeyPackageManager {
 
     /// Get the credential associated with a username
     pub fn get_credential(&self, username: &str) -> Option<MlsCredential> {
-        let cache = self.credential_cache.lock()
+        let cache = self
+            .credential_cache
+            .lock()
             .expect("credential_cache lock poisoned in get_credential");
         cache.get(username).cloned()
     }
@@ -256,7 +278,9 @@ impl KeyPackageManager {
             return Err(anyhow!("Cannot store invalid or expired credential"));
         }
 
-        let mut cache = self.credential_cache.lock()
+        let mut cache = self
+            .credential_cache
+            .lock()
             .map_err(|e| anyhow!("Failed to acquire credential_cache lock: {}", e))?;
         cache.insert(credential.username.clone(), credential);
         Ok(())
@@ -264,7 +288,9 @@ impl KeyPackageManager {
 
     /// Remove a credential for a user
     pub fn remove_credential(&self, username: &str) -> Option<MlsCredential> {
-        let mut cache = self.credential_cache.lock()
+        let mut cache = self
+            .credential_cache
+            .lock()
             .expect("credential_cache lock poisoned in remove_credential");
         cache.remove(username)
     }
@@ -276,7 +302,9 @@ impl KeyPackageManager {
             return Err(anyhow!("Invalid key package for user: {}", username));
         }
 
-        let mut cache = self.key_package_cache.lock()
+        let mut cache = self
+            .key_package_cache
+            .lock()
             .map_err(|e| anyhow!("Failed to acquire key_package_cache lock: {}", e))?;
         cache.insert(username.to_string(), key_package_b64.to_string());
         log::info!("Stored key package for user: {}", username);
@@ -285,21 +313,27 @@ impl KeyPackageManager {
 
     /// Retrieve a stored key package for a user
     pub fn get_key_package(&self, username: &str) -> Result<Option<String>> {
-        let cache = self.key_package_cache.lock()
+        let cache = self
+            .key_package_cache
+            .lock()
             .map_err(|e| anyhow!("Failed to acquire key_package_cache lock: {}", e))?;
         Ok(cache.get(username).cloned())
     }
 
     /// Check if we have a key package for a user
     pub fn has_key_package(&self, username: &str) -> bool {
-        let cache = self.key_package_cache.lock()
+        let cache = self
+            .key_package_cache
+            .lock()
             .expect("key_package_cache lock poisoned in has_key_package");
         cache.contains_key(username)
     }
 
     /// Clear stored key package for a user (for testing/cleanup)
     pub fn clear_key_package(&self, username: &str) -> Result<()> {
-        let mut cache = self.key_package_cache.lock()
+        let mut cache = self
+            .key_package_cache
+            .lock()
             .map_err(|e| anyhow!("Failed to acquire key_package_cache lock: {}", e))?;
         cache.remove(username);
         log::info!("Cleared key package for user: {}", username);
@@ -308,7 +342,9 @@ impl KeyPackageManager {
 
     /// Get all stored usernames (for debugging)
     pub fn list_stored_users(&self) -> Vec<String> {
-        let cache = self.key_package_cache.lock()
+        let cache = self
+            .key_package_cache
+            .lock()
             .expect("key_package_cache lock poisoned in list_stored_users");
         cache.keys().cloned().collect()
     }

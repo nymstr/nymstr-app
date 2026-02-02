@@ -6,9 +6,9 @@
 #![allow(dead_code)] // Methods are part of the public API for MLS persistence
 
 use anyhow::Result;
-use std::sync::Arc;
-use std::collections::HashMap;
 use base64::Engine;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::core::db::Db;
 
@@ -39,16 +39,27 @@ impl MlsGroupPersistence {
     pub async fn save_group_state(&self, group_id: &[u8], group_state: &[u8]) -> Result<()> {
         let group_id_str = self.group_id_to_string(group_id);
 
-        log::debug!("Saving MLS group state for conversation {} (size: {} bytes)",
-                   group_id_str, group_state.len());
+        log::debug!(
+            "Saving MLS group state for conversation {} (size: {} bytes)",
+            group_id_str,
+            group_state.len()
+        );
 
         // Save to database
-        self.db.save_mls_group_state(&self.username, &group_id_str, group_state).await?;
+        self.db
+            .save_mls_group_state(&self.username, &group_id_str, group_state)
+            .await?;
 
         // Update cache
-        self.cache.lock().await.insert(group_id.to_vec(), group_state.to_vec());
+        self.cache
+            .lock()
+            .await
+            .insert(group_id.to_vec(), group_state.to_vec());
 
-        log::info!("Successfully saved MLS group state for conversation {}", group_id_str);
+        log::info!(
+            "Successfully saved MLS group state for conversation {}",
+            group_id_str
+        );
         Ok(())
     }
 
@@ -58,17 +69,30 @@ impl MlsGroupPersistence {
 
         // Check cache first
         if let Some(state) = self.cache.lock().await.get(group_id).cloned() {
-            log::debug!("Found MLS group state in cache for conversation {}", group_id_str);
+            log::debug!(
+                "Found MLS group state in cache for conversation {}",
+                group_id_str
+            );
             return Ok(Some(state));
         }
 
         // Load from database
-        match self.db.load_mls_group_state(&self.username, &group_id_str).await? {
+        match self
+            .db
+            .load_mls_group_state(&self.username, &group_id_str)
+            .await?
+        {
             Some(state) => {
-                log::debug!("Loaded MLS group state from database for conversation {} (size: {} bytes)",
-                           group_id_str, state.len());
+                log::debug!(
+                    "Loaded MLS group state from database for conversation {} (size: {} bytes)",
+                    group_id_str,
+                    state.len()
+                );
                 // Cache for next time
-                self.cache.lock().await.insert(group_id.to_vec(), state.clone());
+                self.cache
+                    .lock()
+                    .await
+                    .insert(group_id.to_vec(), state.clone());
                 Ok(Some(state))
             }
             None => {
@@ -85,12 +109,17 @@ impl MlsGroupPersistence {
         log::debug!("Deleting MLS group state for conversation {}", group_id_str);
 
         // Remove from database
-        self.db.delete_mls_group_state(&self.username, &group_id_str).await?;
+        self.db
+            .delete_mls_group_state(&self.username, &group_id_str)
+            .await?;
 
         // Remove from cache
         self.cache.lock().await.remove(group_id);
 
-        log::info!("Successfully deleted MLS group state for conversation {}", group_id_str);
+        log::info!(
+            "Successfully deleted MLS group state for conversation {}",
+            group_id_str
+        );
         Ok(())
     }
 
@@ -104,7 +133,10 @@ impl MlsGroupPersistence {
         }
 
         // Check database
-        let state = self.db.load_mls_group_state(&self.username, &group_id_str).await?;
+        let state = self
+            .db
+            .load_mls_group_state(&self.username, &group_id_str)
+            .await?;
         Ok(state.is_some())
     }
 

@@ -5,16 +5,16 @@
 //! - PGP for identity and signing
 //! - Conversation establishment protocols
 
+pub mod message_crypto;
 pub mod mls;
 pub mod pgp;
 pub mod utils;
-pub mod message_crypto;
 
 // Re-export main types
 #[allow(unused_imports)] // Part of public API
-pub use mls::{MlsClient, EncryptedMessage, MlsMessageType, MlsConversationManager};
+pub use message_crypto::{MessageCrypto, VerifiedMessage};
+#[allow(unused_imports)] // Part of public API
+pub use mls::{EncryptedMessage, MlsClient, MlsConversationManager, MlsMessageType};
 #[allow(unused_imports)] // Part of public API
 pub use pgp::{PgpKeyManager, PgpSigner, SecurePassphrase, VerifiedSignature};
 pub use utils::Crypto;
-#[allow(unused_imports)] // Part of public API
-pub use message_crypto::{MessageCrypto, VerifiedMessage};

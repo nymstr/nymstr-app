@@ -4,7 +4,7 @@
 
 use crate::core::messages::MixnetMessage;
 use crate::crypto::{Crypto, EncryptedMessage};
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use pgp::composed::SignedPublicKey;
 
 /// Result of message decryption and verification
@@ -25,11 +25,15 @@ impl MessageCrypto {
         sender_public_key: Option<&SignedPublicKey>,
     ) -> Result<VerifiedMessage> {
         // Extract encrypted message from payload
-        let encrypted_data = envelope.payload.get("encrypted")
+        let encrypted_data = envelope
+            .payload
+            .get("encrypted")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing encrypted data in message"))?;
 
-        let signature = envelope.payload.get("signature")
+        let signature = envelope
+            .payload
+            .get("signature")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing signature in message"))?;
 
@@ -39,7 +43,9 @@ impl MessageCrypto {
 
         // For now, handle as direct message (no MLS decryption)
         // TODO: Implement proper MLS decryption based on message type
-        let content = envelope.payload.get("content")
+        let content = envelope
+            .payload
+            .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("(encrypted content)");
 
@@ -51,12 +57,19 @@ impl MessageCrypto {
                     true
                 }
                 Err(e) => {
-                    log::error!("Signature verification failed from {}: {}", envelope.sender, e);
+                    log::error!(
+                        "Signature verification failed from {}: {}",
+                        envelope.sender,
+                        e
+                    );
                     false
                 }
             }
         } else {
-            log::warn!("No public key available for signature verification from {}", envelope.sender);
+            log::warn!(
+                "No public key available for signature verification from {}",
+                envelope.sender
+            );
             false
         };
 
@@ -69,7 +82,9 @@ impl MessageCrypto {
 
     /// Extract handshake information from message
     pub fn extract_handshake_info(envelope: &MixnetMessage) -> Result<String> {
-        envelope.payload.get("nym_address")
+        envelope
+            .payload
+            .get("nym_address")
             .and_then(|v| v.as_str())
             .map(|addr| addr.to_string())
             .ok_or_else(|| anyhow!("Missing nym_address in handshake message"))
@@ -77,7 +92,9 @@ impl MessageCrypto {
 
     /// Extract key package from MLS message
     pub fn extract_key_package(envelope: &MixnetMessage) -> Result<String> {
-        envelope.payload.get("senderKeyPackage")
+        envelope
+            .payload
+            .get("senderKeyPackage")
             .and_then(|v| v.as_str())
             .map(|pkg| pkg.to_string())
             .ok_or_else(|| anyhow!("Missing senderKeyPackage in MLS message"))
@@ -85,11 +102,15 @@ impl MessageCrypto {
 
     /// Extract group welcome information from MLS message
     pub fn extract_group_welcome(envelope: &MixnetMessage) -> Result<(String, String)> {
-        let welcome_message = envelope.payload.get("welcomeMessage")
+        let welcome_message = envelope
+            .payload
+            .get("welcomeMessage")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing welcomeMessage in group welcome"))?;
 
-        let group_id = envelope.payload.get("groupId")
+        let group_id = envelope
+            .payload
+            .get("groupId")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing groupId in group welcome"))?;
 
@@ -98,10 +119,14 @@ impl MessageCrypto {
 
     /// Extract MLS chat message data from envelope
     pub fn extract_mls_message(envelope: &MixnetMessage) -> Result<(String, String)> {
-        let conversation_id = envelope.payload.get("conversation_id")
+        let conversation_id = envelope
+            .payload
+            .get("conversation_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing conversation_id in MLS message"))?;
-        let mls_message = envelope.payload.get("mls_message")
+        let mls_message = envelope
+            .payload
+            .get("mls_message")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing mls_message in MLS message"))?;
         Ok((conversation_id.to_string(), mls_message.to_string()))
@@ -121,28 +146,28 @@ impl MessageCrypto {
         // Action-specific validation
         match envelope.action.as_str() {
             "send" | "incomingMessage" => {
-                if !envelope.payload.get("encrypted").is_some() {
+                if envelope.payload.get("encrypted").is_none() {
                     return Err(anyhow!("Chat message missing encrypted payload"));
                 }
-                if !envelope.payload.get("signature").is_some() {
+                if envelope.payload.get("signature").is_none() {
                     return Err(anyhow!("Chat message missing signature"));
                 }
             }
             "handshake" => {
-                if !envelope.payload.get("nym_address").is_some() {
+                if envelope.payload.get("nym_address").is_none() {
                     return Err(anyhow!("Handshake message missing nym_address"));
                 }
             }
             "keyPackageRequest" => {
-                if !envelope.payload.get("senderKeyPackage").is_some() {
+                if envelope.payload.get("senderKeyPackage").is_none() {
                     return Err(anyhow!("Key package request missing senderKeyPackage"));
                 }
             }
             "groupWelcome" => {
-                if !envelope.payload.get("welcomeMessage").is_some() {
+                if envelope.payload.get("welcomeMessage").is_none() {
                     return Err(anyhow!("Group welcome missing welcomeMessage"));
                 }
-                if !envelope.payload.get("groupId").is_some() {
+                if envelope.payload.get("groupId").is_none() {
                     return Err(anyhow!("Group welcome missing groupId"));
                 }
             }
@@ -174,19 +199,25 @@ mod tests {
 
     #[test]
     fn test_validate_chat_message() {
-        let envelope = create_test_envelope("send", json!({
-            "encrypted": "test_encrypted_data",
-            "signature": "test_signature"
-        }));
+        let envelope = create_test_envelope(
+            "send",
+            json!({
+                "encrypted": "test_encrypted_data",
+                "signature": "test_signature"
+            }),
+        );
 
         assert!(MessageCrypto::validate_message_structure(&envelope).is_ok());
     }
 
     #[test]
     fn test_validate_handshake_message() {
-        let envelope = create_test_envelope("handshake", json!({
-            "nym_address": "test_address"
-        }));
+        let envelope = create_test_envelope(
+            "handshake",
+            json!({
+                "nym_address": "test_address"
+            }),
+        );
 
         assert!(MessageCrypto::validate_message_structure(&envelope).is_ok());
     }
@@ -200,9 +231,12 @@ mod tests {
 
     #[test]
     fn test_extract_handshake_info() {
-        let envelope = create_test_envelope("handshake", json!({
-            "nym_address": "test_nym_address"
-        }));
+        let envelope = create_test_envelope(
+            "handshake",
+            json!({
+                "nym_address": "test_nym_address"
+            }),
+        );
 
         let result = MessageCrypto::extract_handshake_info(&envelope);
         assert!(result.is_ok());
@@ -211,9 +245,12 @@ mod tests {
 
     #[test]
     fn test_extract_key_package() {
-        let envelope = create_test_envelope("keyPackageRequest", json!({
-            "senderKeyPackage": "test_key_package"
-        }));
+        let envelope = create_test_envelope(
+            "keyPackageRequest",
+            json!({
+                "senderKeyPackage": "test_key_package"
+            }),
+        );
 
         let result = MessageCrypto::extract_key_package(&envelope);
         assert!(result.is_ok());

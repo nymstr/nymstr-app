@@ -3,7 +3,7 @@ mod layout;
 pub mod widgets;
 
 use crate::app::App;
-use ratatui::{Frame, layout::Rect};
+use ratatui::{layout::Rect, Frame};
 
 pub fn render_ui(app: &App, frame: &mut Frame, area: Rect) {
     let layout = layout::main_layout(area);

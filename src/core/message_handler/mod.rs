@@ -11,28 +11,28 @@
 #![allow(dead_code)]
 
 mod auth;
-mod mls;
-mod group;
-mod direct;
-mod welcome;
 mod buffer;
+mod direct;
+mod group;
+mod mls;
+mod welcome;
 
 // Re-export buffer processor types for public API
 #[allow(unused_imports)] // Part of public API
 pub use buffer::{start_buffer_processor, BufferProcessorHandle};
 
-use crate::crypto::{Crypto, MlsConversationManager, SecurePassphrase};
-use crate::crypto::mls::persistence::MlsGroupPersistence;
-use crate::core::message_router::{MessageRouter, MessageRoute};
 use crate::core::auth_handler::AuthenticationHandler;
 use crate::core::chat_handler::{ChatHandler, ChatResult};
-use crate::crypto::mls::KeyPackageManager;
 use crate::core::db::Db;
+use crate::core::message_router::{MessageRoute, MessageRouter};
 use crate::core::mixnet_client::{Incoming, MixnetService};
-use tokio::sync::mpsc::Receiver;
+use crate::crypto::mls::persistence::MlsGroupPersistence;
+use crate::crypto::mls::KeyPackageManager;
+use crate::crypto::{Crypto, MlsConversationManager, SecurePassphrase};
 use std::sync::Arc;
+use tokio::sync::mpsc::Receiver;
 
-use pgp::composed::{SignedSecretKey, SignedPublicKey};
+use pgp::composed::{SignedPublicKey, SignedSecretKey};
 
 /// Type alias for Arc-wrapped PGP secret key to reduce expensive cloning
 pub type ArcSecretKey = Arc<SignedSecretKey>;
@@ -115,7 +115,12 @@ impl MessageHandler {
 
     /// Set PGP keys for the current session (called by CLI after key management)
     /// Keys are wrapped in Arc to enable cheap cloning for handlers that need them
-    pub fn set_pgp_keys(&mut self, secret_key: SignedSecretKey, public_key: SignedPublicKey, passphrase: SecurePassphrase) {
+    pub fn set_pgp_keys(
+        &mut self,
+        secret_key: SignedSecretKey,
+        public_key: SignedPublicKey,
+        passphrase: SecurePassphrase,
+    ) {
         self.pgp_secret_key = Some(Arc::new(secret_key));
         self.pgp_public_key = Some(Arc::new(public_key));
         self.pgp_passphrase = Some(Arc::new(passphrase));
@@ -128,7 +133,10 @@ impl MessageHandler {
 
         // Only process messages that should be handled immediately
         if !MessageRouter::should_process_immediately(&route) {
-            log::debug!("Message routed to {}, not processing immediately", MessageRouter::route_description(&route));
+            log::debug!(
+                "Message routed to {}, not processing immediately",
+                MessageRouter::route_description(&route)
+            );
             return vec![];
         }
 
@@ -187,7 +195,10 @@ impl MessageHandler {
             }
             MessageRoute::MlsProtocol => {
                 // Handle MLS protocol messages with epoch-aware buffering
-                match mls_manager.handle_mls_protocol_message(&incoming.envelope).await {
+                match mls_manager
+                    .handle_mls_protocol_message(&incoming.envelope)
+                    .await
+                {
                     Ok((sender, message)) => {
                         if !sender.is_empty() && !message.is_empty() {
                             vec![(sender, message)]
@@ -198,9 +209,15 @@ impl MessageHandler {
                     Err(e) => {
                         // Check if this might be an epoch-related error that should be buffered
                         let error_msg = e.to_string().to_lowercase();
-                        if error_msg.contains("epoch") || error_msg.contains("stale")
-                            || error_msg.contains("generation") || error_msg.contains("cannot decrypt") {
-                            log::warn!("MLS message may be out of order (epoch error), buffering: {}", e);
+                        if error_msg.contains("epoch")
+                            || error_msg.contains("stale")
+                            || error_msg.contains("generation")
+                            || error_msg.contains("cannot decrypt")
+                        {
+                            log::warn!(
+                                "MLS message may be out of order (epoch error), buffering: {}",
+                                e
+                            );
                             // The ConversationManager will handle buffering internally
                         } else {
                             log::error!("Failed to process MLS protocol message: {}", e);
@@ -221,7 +238,10 @@ impl MessageHandler {
             }
             MessageRoute::Group => {
                 // Handle group server responses (fetchGroupResponse, etc.) with epoch-aware buffering
-                match self.handle_group_response(&incoming.envelope, &mut mls_manager).await {
+                match self
+                    .handle_group_response(&incoming.envelope, &mut mls_manager)
+                    .await
+                {
                     Ok(messages) => messages,
                     Err(e) => {
                         log::error!("Failed to process group response: {}", e);
@@ -296,9 +316,11 @@ mod tests {
 
         assert_eq!(encrypted.conversation_id, b"test");
         assert_eq!(encrypted.mls_message, b"test");
-        assert!(matches!(encrypted.message_type, MlsMessageType::Application));
+        assert!(matches!(
+            encrypted.message_type,
+            MlsMessageType::Application
+        ));
     }
-
 
     #[tokio::test]
     async fn test_json_parsing_for_registration() {

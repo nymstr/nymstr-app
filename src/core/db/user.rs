@@ -2,7 +2,7 @@
 //!
 //! This module contains methods for user registration, initialization, and retrieval.
 
-use super::{Db, sanitize_table_name};
+use super::{sanitize_table_name, Db};
 use anyhow::Result;
 use sqlx::Row;
 
