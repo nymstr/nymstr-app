@@ -63,7 +63,7 @@ async fn test_fetch_group_message_format() -> Result<()> {
 /// Test approve group member message format
 #[tokio::test]
 async fn test_approve_group_member_format() -> Result<()> {
-    let msg = MixnetMessage::approve_group_member("admin", "new_member", "signature");
+    let msg = MixnetMessage::approve_group_member("admin", "new_member", "signature", "group-server-1", 1700000000);
 
     assert_eq!(msg.message_type, "system");
     assert_eq!(msg.action, "approveGroup");

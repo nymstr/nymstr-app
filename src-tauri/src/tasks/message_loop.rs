@@ -69,6 +69,19 @@ async fn process_message(
     incoming: &Incoming,
     route: MessageRoute,
 ) -> anyhow::Result<()> {
+    // Verify server signatures for server-origin messages
+    let is_server_message = matches!(
+        route,
+        MessageRoute::Group | MessageRoute::WelcomeFlow | MessageRoute::Query
+    );
+    if is_server_message && !state.verify_server_signature(&incoming.envelope).await {
+        tracing::error!(
+            "Dropping message with action '{}': server signature verification failed",
+            incoming.envelope.action
+        );
+        return Ok(());
+    }
+
     match route {
         MessageRoute::Authentication => {
             // Authentication messages are handled by the auth command flow

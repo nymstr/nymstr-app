@@ -503,8 +503,15 @@ impl MixnetService {
         username_to_approve: &str,
         signature: &str,
         group_server_address: &str,
+        timestamp: i64,
     ) -> Result<()> {
-        let env = MixnetMessage::approve_group_member(admin, username_to_approve, signature);
+        let env = MixnetMessage::approve_group_member(
+            admin,
+            username_to_approve,
+            signature,
+            group_server_address,
+            timestamp,
+        );
         log::info!(
             "Approving group member {} on server {}",
             username_to_approve,
@@ -969,8 +976,9 @@ impl MixnetSender for MixnetService {
         username_to_approve: &str,
         signature: &str,
         group_server_address: &str,
+        timestamp: i64,
     ) -> Result<()> {
-        MixnetService::approve_group_member(self, admin, username_to_approve, signature, group_server_address).await
+        MixnetService::approve_group_member(self, admin, username_to_approve, signature, group_server_address, timestamp).await
     }
 
     async fn send_group_fetch_request(

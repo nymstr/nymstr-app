@@ -339,6 +339,19 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // Server public keys table - Trust-On-First-Use verification
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS server_keys (
+            server_id TEXT PRIMARY KEY,
+            public_key TEXT NOT NULL,
+            first_seen TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        "#,
+    )
+    .execute(db)
+    .await?;
+
     Ok(())
 }
 

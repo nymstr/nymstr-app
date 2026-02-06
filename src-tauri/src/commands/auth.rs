@@ -180,7 +180,20 @@ pub async fn register_user(
                                 if context == "registration" {
                                     if let Some(result) = env.payload.get("result").and_then(|v| v.as_str()) {
                                         match auth_handler.process_register_response(&username, result) {
-                                            Ok(true) => return Ok(()),
+                                            Ok(true) => {
+                                                // Extract server public key from response (TOFU)
+                                                let server_pk = env.payload.get("serverPublicKey")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from)
+                                                    .or_else(|| {
+                                                        // Legacy format: content may be JSON with serverPublicKey
+                                                        env.payload.get("content")
+                                                            .and_then(|v| v.as_str())
+                                                            .and_then(|c| serde_json::from_str::<serde_json::Value>(c).ok())
+                                                            .and_then(|p| p.get("serverPublicKey")?.as_str().map(String::from))
+                                                    });
+                                                return Ok(server_pk);
+                                            }
                                             Ok(false) => return Err(format!("Registration failed: {}", result)),
                                             Err(e) => return Err(format!("Error processing response: {}", e)),
                                         }
@@ -202,9 +215,10 @@ pub async fn register_user(
     .await;
 
     // Handle result
-    match result {
-        Ok(Ok(())) => {
+    let server_pk = match result {
+        Ok(Ok(server_pk)) => {
             tracing::info!("Registration successful for user: {}", username);
+            server_pk
         }
         Ok(Err(e)) => {
             // Put the receiver back on failure
@@ -216,6 +230,11 @@ pub async fn register_user(
             *state.incoming_rx.write().await = Some(incoming_rx);
             return Err(ApiError::timeout("Registration timed out waiting for server response"));
         }
+    };
+
+    // Store server public key if provided (TOFU)
+    if let Some(ref pk) = server_pk {
+        state.store_server_public_key(pk).await;
     }
 
     // 8. Store user in database
@@ -360,7 +379,19 @@ pub async fn login_user(
                                 if context == "login" {
                                     if let Some(result) = env.payload.get("result").and_then(|v| v.as_str()) {
                                         match auth_handler.process_login_response(&username, result) {
-                                            Ok(true) => return Ok(()),
+                                            Ok(true) => {
+                                                // Extract server public key (TOFU)
+                                                let server_pk = env.payload.get("serverPublicKey")
+                                                    .and_then(|v| v.as_str())
+                                                    .map(String::from)
+                                                    .or_else(|| {
+                                                        env.payload.get("content")
+                                                            .and_then(|v| v.as_str())
+                                                            .and_then(|c| serde_json::from_str::<serde_json::Value>(c).ok())
+                                                            .and_then(|p| p.get("serverPublicKey")?.as_str().map(String::from))
+                                                    });
+                                                return Ok(server_pk);
+                                            }
                                             Ok(false) => return Err(format!("Login failed: {}", result)),
                                             Err(e) => return Err(format!("Error processing response: {}", e)),
                                         }
@@ -382,9 +413,10 @@ pub async fn login_user(
     .await;
 
     // Handle result
-    match result {
-        Ok(Ok(())) => {
+    let server_pk = match result {
+        Ok(Ok(server_pk)) => {
             tracing::info!("Login successful for user: {}", username);
+            server_pk
         }
         Ok(Err(e)) => {
             // Put the receiver back on failure
@@ -400,7 +432,13 @@ pub async fn login_user(
             state.clear_pgp_keys().await;
             return Err(ApiError::timeout("Login timed out waiting for server response"));
         }
+    };
+
+    // Store server public key if provided (TOFU), or load from DB
+    if let Some(ref pk) = server_pk {
+        state.store_server_public_key(pk).await;
     }
+    state.load_server_public_key().await;
 
     // 7. Set current user
     let user = UserDTO {

@@ -409,9 +409,17 @@ impl MixnetMessage {
     }
 
     /// Create approveGroup message for admin to approve a pending user
-    pub fn approve_group_member(admin: &str, username_to_approve: &str, signature: &str) -> Self {
+    pub fn approve_group_member(
+        admin: &str,
+        username_to_approve: &str,
+        signature: &str,
+        group_id: &str,
+        timestamp: i64,
+    ) -> Self {
         let payload = serde_json::json!({
-            "username": username_to_approve
+            "username": username_to_approve,
+            "groupId": group_id,
+            "timestamp": timestamp
         });
         Self {
             message_type: "system".into(),
