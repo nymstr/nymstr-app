@@ -168,9 +168,18 @@ impl DirectMessageHandler {
             .encrypt_message(group_id, wrapped.as_bytes())
             .await?;
 
-        // Sign the ciphertext for authentication
-        let ciphertext_b64 = base64::engine::general_purpose::STANDARD.encode(&encrypted.mls_message);
-        let signature = self.sign_message(&ciphertext_b64)?;
+        // Build the same payload that will be sent, and sign the serialized form
+        let conversation_id_b64 =
+            base64::engine::general_purpose::STANDARD.encode(&encrypted.conversation_id);
+        let ciphertext_b64 =
+            base64::engine::general_purpose::STANDARD.encode(&encrypted.mls_message);
+        let payload = serde_json::json!({
+            "conversation_id": conversation_id_b64,
+            "mls_message": ciphertext_b64
+        });
+        let payload_str = serde_json::to_string(&payload)
+            .map_err(|e| anyhow!("Failed to serialize payload: {}", e))?;
+        let signature = self.sign_message(&payload_str)?;
 
         // Send via mixnet
         self.mixnet_service

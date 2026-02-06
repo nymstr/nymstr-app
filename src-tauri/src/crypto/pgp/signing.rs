@@ -2,6 +2,7 @@
 
 use crate::crypto::pgp::keypair::SecurePassphrase;
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose, Engine as _};
 use pgp::composed::{Deserializable, SignedPublicKey, SignedSecretKey, StandaloneSignature};
 use pgp::packet::{SignatureConfig, SignatureType, Subpacket, SubpacketData};
 use pgp::types::{KeyDetails, PublicKeyTrait};
@@ -171,6 +172,54 @@ impl PgpSigner {
             result.signer_user_id
         );
         Ok(result)
+    }
+
+    /// Verify a PGP signature that may be in either armored or base64-encoded binary format.
+    /// This handles signatures from both client (armored) and server (base64 binary) sources.
+    pub fn verify_detached_any_format(
+        public_key: &SignedPublicKey,
+        data: &[u8],
+        signature_str: &str,
+    ) -> Result<VerifiedSignature> {
+        let standalone_sig = if signature_str.starts_with("-----BEGIN PGP SIGNATURE-----") {
+            let (sig, _) =
+                StandaloneSignature::from_armor_single(std::io::Cursor::new(signature_str))
+                    .map_err(|e| anyhow!("Failed to parse armored signature: {}", e))?;
+            sig
+        } else {
+            let signature_bytes = general_purpose::STANDARD
+                .decode(signature_str)
+                .map_err(|e| anyhow!("Failed to base64-decode signature: {}", e))?;
+            StandaloneSignature::from_bytes(signature_bytes.as_slice())
+                .map_err(|e| anyhow!("Failed to parse binary signature: {}", e))?
+        };
+
+        let is_valid = standalone_sig
+            .verify(&public_key.primary_key, data)
+            .map(|_| true)
+            .unwrap_or(false);
+
+        let signer_user_id = if let Some(first_uid) = public_key.details.users.first() {
+            String::from_utf8_lossy(first_uid.id.id()).to_string()
+        } else {
+            "unknown".to_string()
+        };
+
+        let created_at = standalone_sig.signature.config().and_then(|config| {
+            config
+                .hashed_subpackets
+                .iter()
+                .find_map(|subpkt| match &subpkt.data {
+                    SubpacketData::SignatureCreationTime(dt) => Some(dt.clone()),
+                    _ => None,
+                })
+        });
+
+        Ok(VerifiedSignature {
+            signer_user_id,
+            is_valid,
+            created_at,
+        })
     }
 
     /// Validate that a public key is suitable for signing.

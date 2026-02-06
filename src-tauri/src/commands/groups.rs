@@ -934,9 +934,14 @@ pub async fn approve_member(
         .await
         .ok_or_else(|| ApiError::internal("PGP keys not available"))?;
 
-    // Sign the username to approve (server verifies against admin public key)
+    // Sign structured content: "approveGroup:{username}:{group_id}:{timestamp}"
+    let timestamp = Utc::now().timestamp();
+    let sign_content = format!(
+        "approveGroup:{}:{}:{}",
+        member_username, group_address, timestamp
+    );
     let signature =
-        PgpSigner::sign_detached_secure(&secret_key, member_username.as_bytes(), &passphrase)
+        PgpSigner::sign_detached_secure(&secret_key, sign_content.as_bytes(), &passphrase)
             .map_err(|e| ApiError::internal(format!("Failed to sign approval: {}", e)))?;
 
     // Send approval request to group server
@@ -951,6 +956,7 @@ pub async fn approve_member(
             &member_username,
             &signature,
             &group_address,
+            timestamp,
         )
         .await
         .map_err(|e| ApiError::internal(format!("Failed to send approval request: {}", e)))?;

@@ -149,6 +149,7 @@ pub trait MixnetSender: Send + Sync {
         username_to_approve: &str,
         signature: &str,
         group_server_address: &str,
+        timestamp: i64,
     ) -> Result<()>;
 
     /// Fetch group messages from group server since last_seen_id

@@ -14,9 +14,11 @@ use tokio::sync::{mpsc, oneshot, RwLock};
 use crate::core::db::schema;
 use crate::core::mixnet_client::{Incoming, MixnetService};
 use crate::crypto::mls::{KeyPackageManager, MlsClient};
+use crate::crypto::pgp::signing::PgpSigner;
 use crate::crypto::pgp::{ArcPassphrase, ArcPublicKey, ArcSecretKey};
 use crate::tasks::BackgroundTasks;
 use crate::types::{ConnectionStatus, UserDTO};
+use pgp::composed::{Deserializable, SignedPublicKey};
 
 /// Result of a user query
 #[derive(Debug, Clone)]
@@ -72,6 +74,9 @@ pub struct AppState {
 
     /// Pending user queries awaiting responses
     pub pending_queries: Arc<RwLock<HashMap<String, oneshot::Sender<Option<QueryResult>>>>>,
+
+    /// Cached discovery server public key for signature verification (TOFU)
+    pub server_public_key: Arc<RwLock<Option<SignedPublicKey>>>,
 }
 
 impl AppState {
@@ -128,6 +133,7 @@ impl AppState {
             key_package_manager: Arc::new(KeyPackageManager::new()),
             background_tasks: Arc::new(RwLock::new(None)),
             pending_queries: Arc::new(RwLock::new(HashMap::new())),
+            server_public_key: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -181,6 +187,108 @@ impl AppState {
     /// Get the server address
     pub async fn get_server_address(&self) -> Option<String> {
         self.server_address.read().await.clone()
+    }
+
+    /// Store the discovery server's public key (TOFU: Trust-On-First-Use).
+    /// On first contact, the key is trusted and stored. On subsequent contacts,
+    /// a key mismatch is rejected to detect potential MITM attacks.
+    pub async fn store_server_public_key(&self, public_key_armored: &str) {
+        // Check for key mismatch (TOFU enforcement)
+        let existing: Option<(String,)> = sqlx::query_as(
+            "SELECT public_key FROM server_keys WHERE server_id = 'discovery'"
+        )
+        .fetch_optional(&self.db)
+        .await
+        .unwrap_or(None);
+
+        if let Some((existing_key,)) = existing {
+            if existing_key != public_key_armored {
+                tracing::warn!(
+                    "Discovery server public key changed! Possible MITM. Rejecting new key."
+                );
+                return;
+            }
+        } else {
+            // First time: store the key
+            let _ = sqlx::query(
+                "INSERT OR IGNORE INTO server_keys (server_id, public_key, first_seen) VALUES ('discovery', ?, datetime('now'))"
+            )
+            .bind(public_key_armored)
+            .execute(&self.db)
+            .await;
+            tracing::info!("Stored discovery server public key (TOFU)");
+        }
+
+        // Parse and cache in memory
+        match SignedPublicKey::from_string(public_key_armored) {
+            Ok((pk, _)) => {
+                *self.server_public_key.write().await = Some(pk);
+            }
+            Err(e) => {
+                tracing::error!("Failed to parse server public key: {}", e);
+            }
+        }
+    }
+
+    /// Load cached server public key from DB.
+    pub async fn load_server_public_key(&self) {
+        if self.server_public_key.read().await.is_some() {
+            return;
+        }
+        let result: Option<(String,)> = sqlx::query_as(
+            "SELECT public_key FROM server_keys WHERE server_id = 'discovery'"
+        )
+        .fetch_optional(&self.db)
+        .await
+        .unwrap_or(None);
+
+        if let Some((pk_armored,)) = result {
+            match SignedPublicKey::from_string(&pk_armored) {
+                Ok((pk, _)) => {
+                    *self.server_public_key.write().await = Some(pk);
+                    tracing::info!("Loaded discovery server public key from DB");
+                }
+                Err(e) => tracing::warn!("Failed to parse stored server key: {}", e),
+            }
+        }
+    }
+
+    /// Verify a server message signature. Returns true if valid or if no key is known yet (TOFU grace).
+    pub async fn verify_server_signature(&self, envelope: &crate::core::messages::MixnetMessage) -> bool {
+        let guard = self.server_public_key.read().await;
+        let server_key = match guard.as_ref() {
+            Some(key) => key,
+            None => return true, // TOFU grace period
+        };
+
+        if envelope.signature.is_empty() {
+            tracing::warn!("Server message '{}' has empty signature", envelope.action);
+            return false;
+        }
+
+        let payload_str = match serde_json::to_string(&envelope.payload) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("Failed to serialize payload for verification: {}", e);
+                return false;
+            }
+        };
+
+        match PgpSigner::verify_detached_any_format(server_key, payload_str.as_bytes(), &envelope.signature) {
+            Ok(result) => {
+                if !result.is_valid {
+                    tracing::warn!(
+                        "Server signature FAILED for action '{}' - possible tampering",
+                        envelope.action
+                    );
+                }
+                result.is_valid
+            }
+            Err(e) => {
+                tracing::warn!("Server signature error for '{}': {}", envelope.action, e);
+                false
+            }
+        }
     }
 }
 

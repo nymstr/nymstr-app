@@ -374,8 +374,9 @@ impl MixnetSender for MockMixnetService {
         username_to_approve: &str,
         signature: &str,
         group_server_address: &str,
+        timestamp: i64,
     ) -> Result<()> {
-        let msg = MixnetMessage::approve_group_member(admin, username_to_approve, signature);
+        let msg = MixnetMessage::approve_group_member(admin, username_to_approve, signature, group_server_address, timestamp);
         self.record_send(group_server_address, msg, None).await;
         Ok(())
     }
