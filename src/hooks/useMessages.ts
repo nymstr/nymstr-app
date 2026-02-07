@@ -88,6 +88,18 @@ export function useMessages(conversationId: string | null) {
     }
   }, [conversationId, fetchMessages]);
 
+  // Mark messages as read whenever the conversation is opened (even if already fetched)
+  useEffect(() => {
+    if (!conversationId || !messages.length) return;
+
+    const lastIncoming = [...messages].reverse().find((m) => !m.isOwn);
+    if (lastIncoming) {
+      api.markAsRead(conversationId, lastIncoming.id).catch((err) =>
+        console.error('[useMessages] Failed to mark as read:', err)
+      );
+    }
+  }, [conversationId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return {
     messages,
     sendMessage,

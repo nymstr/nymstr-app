@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { onAppEvent } from '../services/events';
+import { markAsRead } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 import { useChatStore } from '../stores/chatStore';
 import { useConnectionStore } from '../stores/connectionStore';
@@ -19,6 +20,7 @@ export function useAppEvents() {
   const addMessage = useChatStore((s) => s.addMessage);
   const updateMessageStatus = useChatStore((s) => s.updateMessageStatus);
   const updateConversation = useChatStore((s) => s.updateConversation);
+  const incrementUnread = useChatStore((s) => s.incrementUnread);
   const updateContactOnlineStatus = useChatStore((s) => s.updateContactOnlineStatus);
   const setMessageSending = useChatStore((s) => s.setMessageSending);
 
@@ -43,17 +45,34 @@ export function useAppEvents() {
       unlisten = await onAppEvent({
         // Handle incoming messages
         onMessage: (message, conversationId) => {
-          // Add message to the conversation
-          addMessage(conversationId, message);
+          // Backend emits normalized DM IDs (dm:user1:user2) but the frontend
+          // stores conversations by peer username. Map to the peer username
+          // so messages land in the correct conversation.
+          const effectiveId = conversationId.startsWith('dm:')
+            ? message.sender
+            : conversationId;
 
-          // Update conversation with last message
-          updateConversation(conversationId, {
+          // Add message to the conversation
+          addMessage(effectiveId, message);
+
+          // Update conversation preview
+          updateConversation(effectiveId, {
             lastMessage: message.content.substring(0, 50),
             lastMessageTime: message.timestamp,
-            unreadCount: 1, // TODO: Track properly based on active conversation
           });
 
-          console.log(`[Event] Message received in conversation ${conversationId}`);
+          // Increment unread only if this conversation is not currently open
+          const isActive = useChatStore.getState().activeConversationId === effectiveId;
+          if (!isActive) {
+            incrementUnread(effectiveId);
+          } else {
+            // Conversation is open — persist read status to DB so it survives restarts
+            markAsRead(effectiveId, message.id).catch((err) =>
+              console.error('[Event] Failed to mark as read:', err)
+            );
+          }
+
+          console.log(`[Event] Message received in conversation ${effectiveId}`);
         },
 
         // Handle connection status changes
@@ -210,6 +229,7 @@ export function useAppEvents() {
     addMessage,
     updateMessageStatus,
     updateConversation,
+    incrementUnread,
     updateContactOnlineStatus,
     setMessageSending,
     // Connection store

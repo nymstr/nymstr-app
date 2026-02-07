@@ -2,6 +2,9 @@
 
 use tauri::State;
 
+use std::collections::HashMap;
+
+use crate::core::message_handler::normalize_conversation_id;
 use crate::state::AppState;
 use crate::types::{ApiError, ContactDTO};
 
@@ -24,17 +27,28 @@ pub async fn get_contacts(
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    // Count unread messages for each contact
+    // Count unread incoming messages per conversation in one query
+    let unread_rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT conversation_id, COUNT(*) FROM messages WHERE is_own = 0 AND status != 'read' GROUP BY conversation_id"
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(e.to_string()))?;
+
+    let unread_map: HashMap<String, i64> = unread_rows.into_iter().collect();
+
     let result: Vec<ContactDTO> = contacts
         .into_iter()
         .map(|(username, display_name, _public_key, last_seen)| {
+            let conversation_id = normalize_conversation_id(&current_user.username, &username);
+            let unread_count = unread_map.get(&conversation_id).copied().unwrap_or(0) as u32;
             ContactDTO {
                 username,
                 display_name,
                 avatar_url: None,
                 last_seen,
-                unread_count: 0, // TODO: Calculate from messages table
-                online: false,   // TODO: Track online status
+                unread_count,
+                online: false, // TODO: Track online status
             }
         })
         .collect();

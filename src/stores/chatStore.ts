@@ -12,6 +12,8 @@ interface ChatStore {
   updateConversation: (id: string, updates: Partial<Conversation>) => void;
   addConversation: (conversation: Conversation) => void;
   removeConversation: (id: string) => void;
+  incrementUnread: (id: string) => void;
+  clearUnread: (id: string) => void;
 
   // Messages per conversation
   messages: Map<string, Message[]>;
@@ -44,7 +46,15 @@ interface ChatStore {
 export const useChatStore = create<ChatStore>((set) => ({
   // Active conversation
   activeConversationId: null,
-  setActiveConversation: (id) => set({ activeConversationId: id }),
+  setActiveConversation: (id) =>
+    set((state) => ({
+      activeConversationId: id,
+      conversations: id
+        ? state.conversations.map((c) =>
+            c.id === id ? { ...c, unreadCount: 0 } : c
+          )
+        : state.conversations,
+    })),
 
   // Conversations
   conversations: [],
@@ -65,6 +75,18 @@ export const useChatStore = create<ChatStore>((set) => ({
   removeConversation: (id) =>
     set((state) => ({
       conversations: state.conversations.filter((c) => c.id !== id),
+    })),
+  incrementUnread: (id) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, unreadCount: (c.unreadCount ?? 0) + 1 } : c
+      ),
+    })),
+  clearUnread: (id) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, unreadCount: 0 } : c
+      ),
     })),
 
   // Messages
