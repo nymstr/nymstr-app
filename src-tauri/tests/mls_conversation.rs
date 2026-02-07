@@ -15,7 +15,6 @@ async fn test_key_package_request_format() -> Result<()> {
     let msg = MixnetMessage::key_package_request(
         "alice",
         "bob",
-        "alice_key_package_b64",
         "signature",
     );
 
@@ -23,7 +22,6 @@ async fn test_key_package_request_format() -> Result<()> {
     assert_eq!(msg.action, "keyPackageRequest");
     assert_eq!(msg.sender, "alice");
     assert_eq!(msg.recipient, "bob");
-    assert_eq!(msg.payload["senderKeyPackage"], "alice_key_package_b64");
 
     Ok(())
 }

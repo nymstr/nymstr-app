@@ -49,6 +49,9 @@ pub trait MixnetSender: Send + Sync {
     async fn send_fetch_pending(&self, username: &str, timestamp: i64, signature: &str)
         -> Result<()>;
 
+    /// Acknowledge receipt of pending messages so the server can delete them
+    async fn send_ack(&self, username: &str, pending_ids: &[i64]) -> Result<()>;
+
     // ========== Direct Messaging Methods ==========
 
     /// Send a message via the discovery server for routing
@@ -87,7 +90,6 @@ pub trait MixnetSender: Send + Sync {
         &self,
         sender: &str,
         recipient: &str,
-        sender_key_package: &str,
         signature: &str,
     ) -> Result<()>;
 
@@ -108,6 +110,18 @@ pub trait MixnetSender: Send + Sync {
         recipient: &str,
         welcome_b64: &str,
         group_id: &str,
+        commit_b64: Option<&str>,
+        ratchet_tree_b64: Option<&str>,
+        signature: &str,
+    ) -> Result<()>;
+
+    /// Send P2P welcome acknowledgment for DM handshake finalization
+    async fn send_p2p_welcome_ack(
+        &self,
+        sender: &str,
+        recipient: &str,
+        conversation_id: &str,
+        accepted: bool,
         signature: &str,
     ) -> Result<()>;
 

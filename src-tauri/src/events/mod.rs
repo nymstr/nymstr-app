@@ -126,6 +126,20 @@ pub enum AppEvent {
         sender: String,
     },
 
+    /// Contact request received (someone wants to DM us)
+    ContactRequestReceived {
+        /// The username of the requester
+        username: String,
+    },
+
+    /// 1:1 DM conversation fully established (both sides ready)
+    ConversationEstablished {
+        /// The normalized conversation ID (dm:alice:bob)
+        conversation_id: String,
+        /// The peer username
+        peer: String,
+    },
+
     // ========== System Events ==========
 
     /// System notification message
@@ -274,6 +288,11 @@ impl EventEmitter {
             mls_group_id,
             sender,
         });
+    }
+
+    /// Emit a contact request received event
+    pub fn contact_request_received(&self, username: String) {
+        self.emit(AppEvent::ContactRequestReceived { username });
     }
 
     // ========== System Event Helpers ==========

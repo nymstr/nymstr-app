@@ -92,10 +92,11 @@ pub async fn send_message(
         secret_key,
         passphrase,
         current_user.username.clone(),
+        state.db.clone(),
     );
 
     // Check if MLS conversation exists
-    if !dm_handler.conversation_exists(&recipient) {
+    if !dm_handler.conversation_exists(&recipient).await {
         tracing::info!("No MLS conversation with {}, initiating key package exchange", recipient);
 
         // Initiate key package request for handshake
@@ -187,10 +188,11 @@ pub async fn initiate_conversation(
         secret_key,
         passphrase,
         current_user.username.clone(),
+        state.db.clone(),
     );
 
     // Check if conversation already exists
-    if dm_handler.conversation_exists(&recipient) {
+    if dm_handler.conversation_exists(&recipient).await {
         tracing::info!("MLS conversation already exists with {}", recipient);
         return Ok(true);
     }
@@ -356,8 +358,25 @@ pub async fn check_conversation_exists(
         .await
         .ok_or_else(|| ApiError::internal("MLS client not initialized".to_string()))?;
 
+    // Look up the real MLS group ID from the database
     let conversation_id = normalize_conversation_id(&current_user.username, &contact);
-    let exists = mls_client.group_exists(conversation_id.as_bytes());
+    let result: Option<(String,)> = sqlx::query_as(
+        "SELECT mls_group_id FROM conversations WHERE id = ?"
+    )
+    .bind(&conversation_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|e| ApiError::internal(format!("Failed to query conversation: {}", e)))?;
+
+    let exists = if let Some((mls_group_id_b64,)) = result {
+        use base64::Engine;
+        match base64::engine::general_purpose::STANDARD.decode(&mls_group_id_b64) {
+            Ok(mls_group_id) => mls_client.group_exists(&mls_group_id),
+            Err(_) => false,
+        }
+    } else {
+        false
+    };
 
     Ok(exists)
 }

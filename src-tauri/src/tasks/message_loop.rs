@@ -4,6 +4,7 @@
 //! It receives messages from the mixnet client, routes them to appropriate handlers,
 //! and emits events to the frontend for real-time updates.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tauri::AppHandle;
@@ -21,6 +22,9 @@ use crate::events::{AppEvent, EventEmitter};
 use crate::state::{AppState, QueryResult};
 use crate::types::{MessageDTO, MessageStatus};
 
+/// Maximum number of pending IDs to track for deduplication
+const DEDUP_SET_CAPACITY: usize = 2000;
+
 /// Start the message receive loop
 ///
 /// This spawns a background task that:
@@ -36,8 +40,24 @@ pub fn start_message_receive_loop(
     tokio::spawn(async move {
         tracing::info!("Message receive loop started");
         let emitter = EventEmitter::new(app_handle.clone());
+        let mut seen_pending_ids: HashSet<i64> = HashSet::new();
 
         while let Some(incoming) = rx.recv().await {
+            // Dedup by pendingId: a message may arrive via both SURB and fetchPending
+            let pending_id = incoming.envelope.payload.get("pendingId").and_then(|v| v.as_i64());
+            if let Some(pid) = pending_id {
+                if seen_pending_ids.contains(&pid) {
+                    tracing::debug!("Dedup: skipping already-seen pendingId {}", pid);
+                    // Still ACK to ensure server cleans up
+                    send_ack_batch(&state, &[pid]).await;
+                    continue;
+                }
+                seen_pending_ids.insert(pid);
+                if seen_pending_ids.len() > DEDUP_SET_CAPACITY {
+                    seen_pending_ids.clear();
+                }
+            }
+
             // Route the message to determine handling
             let route = MessageRouter::route_message(&incoming);
             let description = MessageRouter::route_description(&route);
@@ -55,6 +75,11 @@ pub fn start_message_receive_loop(
                     incoming.envelope.action,
                     e
                 );
+            }
+
+            // ACK after successful processing
+            if let Some(pid) = pending_id {
+                send_ack_batch(&state, &[pid]).await;
             }
         }
 
@@ -185,36 +210,25 @@ async fn handle_mls_message(
     match action {
         "keyPackageRequest" => {
             // Someone wants to establish a conversation with us
+            // Store the request for the user to accept/deny instead of auto-responding
             tracing::info!("Received key package request from {}", sender);
 
-            // Get required state
-            let current_user = state.get_current_user().await
-                .ok_or_else(|| anyhow::anyhow!("No user logged in"))?;
-            let mls_client = state.get_mls_client().await
-                .ok_or_else(|| anyhow::anyhow!("MLS client not initialized"))?;
-            let mixnet_service = state.get_mixnet_service().await
-                .ok_or_else(|| anyhow::anyhow!("Mixnet not connected"))?;
-            let (pgp_secret_key, pgp_passphrase) = state.get_pgp_signing_keys().await
-                .ok_or_else(|| anyhow::anyhow!("PGP keys not available"))?;
+            // Store the contact request in the database
+            // The initiator no longer sends their own KP — only a signed request
+            sqlx::query(
+                r#"
+                INSERT OR REPLACE INTO contact_requests (from_username, key_package, received_at, status)
+                VALUES (?, '', datetime('now'), 'pending')
+                "#,
+            )
+            .bind(sender)
+            .execute(&state.db)
+            .await?;
 
-            // Create direct message handler
-            let handler = DirectMessageHandlerBuilder::new()
-                .mls_client(mls_client)
-                .mixnet_service(mixnet_service)
-                .pgp_keys(pgp_secret_key, pgp_passphrase)
-                .current_user(current_user.username.clone())
-                .build()?;
+            // Notify the frontend
+            emitter.contact_request_received(sender.clone());
 
-            // Get their key package from payload
-            let their_key_package = payload
-                .get("senderKeyPackage")
-                .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("Missing senderKeyPackage in request"))?;
-
-            // Respond with our key package
-            handler.respond_to_key_package_request(sender, their_key_package).await?;
-
-            tracing::info!("Sent key package response to {}", sender);
+            tracing::info!("Stored contact request from {}, pending user action", sender);
         }
 
         "keyPackageResponse" => {
@@ -235,6 +249,7 @@ async fn handle_mls_message(
                 .mixnet_service(mixnet_service)
                 .pgp_keys(pgp_secret_key, pgp_passphrase)
                 .current_user(current_user.username.clone())
+                .db(state.db.clone())
                 .build()?;
 
             // Get their key package
@@ -251,6 +266,7 @@ async fn handle_mls_message(
 
         "p2pWelcome" => {
             // Received P2P welcome to join a 1:1 conversation
+            // Consent already happened at the keyPackageRequest step
             tracing::info!("Received P2P welcome from {}", sender);
 
             let current_user = state.get_current_user().await
@@ -267,6 +283,7 @@ async fn handle_mls_message(
                 .mixnet_service(mixnet_service)
                 .pgp_keys(pgp_secret_key, pgp_passphrase)
                 .current_user(current_user.username.clone())
+                .db(state.db.clone())
                 .build()?;
 
             // Get welcome message from payload
@@ -275,10 +292,65 @@ async fn handle_mls_message(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("Missing welcomeMessage in payload"))?;
 
-            // Join the conversation
+            let conversation_id = payload
+                .get("groupId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            // Join the conversation using the Welcome
             handler.process_incoming_message(sender, welcome_message, MlsMessageType::Welcome).await?;
 
-            tracing::info!("Joined conversation with {}", sender);
+            // Send p2pWelcomeAck back to the initiator so they can finalize
+            handler.send_welcome_ack(sender, conversation_id, true).await?;
+
+            tracing::info!("Joined conversation with {} and sent p2pWelcomeAck", sender);
+        }
+
+        "p2pWelcomeAck" => {
+            // Received acknowledgment that the other party processed our Welcome
+            // Now we can finalize by applying the pending commit
+            tracing::info!("Received p2pWelcomeAck from {}", sender);
+
+            let accepted = payload
+                .get("accepted")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
+            let current_user = state.get_current_user().await
+                .ok_or_else(|| anyhow::anyhow!("No user logged in"))?;
+            let mls_client = state.get_mls_client().await
+                .ok_or_else(|| anyhow::anyhow!("MLS client not initialized"))?;
+            let mixnet_service = state.get_mixnet_service().await
+                .ok_or_else(|| anyhow::anyhow!("Mixnet not connected"))?;
+            let (pgp_secret_key, pgp_passphrase) = state.get_pgp_signing_keys().await
+                .ok_or_else(|| anyhow::anyhow!("PGP keys not available"))?;
+
+            let handler = DirectMessageHandlerBuilder::new()
+                .mls_client(mls_client)
+                .mixnet_service(mixnet_service)
+                .pgp_keys(pgp_secret_key, pgp_passphrase)
+                .current_user(current_user.username.clone())
+                .db(state.db.clone())
+                .build()?;
+
+            if accepted {
+                handler.finalize_handshake(sender).await?;
+
+                let conversation_id = payload
+                    .get("conversationId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                emitter.emit(crate::events::AppEvent::ConversationEstablished {
+                    conversation_id: conversation_id.to_string(),
+                    peer: sender.to_string(),
+                });
+
+                tracing::info!("DM handshake finalized with {} (conversation: {})", sender, conversation_id);
+            } else {
+                handler.cleanup_failed_handshake(sender).await?;
+                tracing::info!("DM handshake rejected by {}", sender);
+            }
         }
 
         "send" | "incomingMessage" => {
@@ -317,6 +389,7 @@ async fn handle_encrypted_message(
         .mixnet_service(mixnet_service)
         .pgp_keys(pgp_secret_key, pgp_passphrase)
         .current_user(current_user.username.clone())
+        .db(state.db.clone())
         .build()?;
 
     // Get the MLS message from payload
@@ -370,8 +443,8 @@ async fn handle_encrypted_message(
                     mls_message_b64: mls_message.to_string(),
                     received_at: incoming.ts.to_rfc3339(),
                     retry_count: 0,
-                    last_retry_at: None,
-                    status: "pending".to_string(),
+                    processed: false,
+                    failed: false,
                     error_message: Some(error_msg),
                 };
 
@@ -700,12 +773,20 @@ async fn handle_pending_delivery(
     let count = payload.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
     tracing::info!("Processing {} pending messages from offline queue", count);
 
+    // Collect pending message IDs for batch ACK
+    let mut acked_ids: Vec<i64> = Vec::new();
+
     // Process each queued message
     for msg in messages {
         let sender = msg.get("sender").and_then(|v| v.as_str()).unwrap_or("unknown");
         let action = msg.get("action").and_then(|v| v.as_str()).unwrap_or("send");
         let msg_payload = msg.get("payload").cloned().unwrap_or_else(|| serde_json::json!({}));
         let timestamp = msg.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+
+        // Collect the pending message ID for ACK
+        if let Some(id) = msg.get("id").and_then(|v| v.as_i64()) {
+            acked_ids.push(id);
+        }
 
         tracing::debug!(
             "Processing queued message from {} (action={}, ts={})",
@@ -753,9 +834,32 @@ async fn handle_pending_delivery(
         }
     }
 
+    // Batch ACK all processed pending messages
+    if !acked_ids.is_empty() {
+        send_ack_batch(state, &acked_ids).await;
+    }
+
     if count > 0 {
         emitter.emit(AppEvent::PendingMessagesDelivered { count: count as u32 });
     }
 
     Ok(())
+}
+
+/// Send a batch ACK for processed pending messages
+async fn send_ack_batch(state: &Arc<AppState>, pending_ids: &[i64]) {
+    if pending_ids.is_empty() {
+        return;
+    }
+    let username = match state.get_current_user().await {
+        Some(u) => u.username.clone(),
+        None => return,
+    };
+    let mixnet_service = match state.get_mixnet_service().await {
+        Some(s) => s,
+        None => return,
+    };
+    if let Err(e) = mixnet_service.send_ack(&username, pending_ids).await {
+        tracing::warn!("Failed to send ACK for {:?}: {}", pending_ids, e);
+    }
 }

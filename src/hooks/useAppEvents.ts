@@ -34,6 +34,7 @@ export function useAppEvents() {
   const addPendingApproval = useGroupStore((s) => s.addPendingApproval);
   const removePendingApproval = useGroupStore((s) => s.removePendingApproval);
   const addPendingWelcome = useGroupStore((s) => s.addPendingWelcome);
+  const addContactRequest = useGroupStore((s) => s.addContactRequest);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -160,6 +161,17 @@ export function useAppEvents() {
           });
         },
 
+        // Handle contact request (DM invite)
+        onContactRequest: (username) => {
+          console.log(`[Event] Contact request received from ${username}`);
+          addContactRequest({
+            id: Date.now(),
+            fromUsername: username,
+            receivedAt: new Date().toISOString(),
+          });
+          showToast.info('Message request', `${username} wants to message you`);
+        },
+
         // Handle contact online status changes
         onContactStatus: (username, online) => {
           updateContactOnlineStatus(username, online);
@@ -211,5 +223,6 @@ export function useAppEvents() {
     addPendingApproval,
     removePendingApproval,
     addPendingWelcome,
+    addContactRequest,
   ]);
 }

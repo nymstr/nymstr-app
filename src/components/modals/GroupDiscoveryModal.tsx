@@ -385,9 +385,9 @@ function GroupCard({ group, joinState, onClose }: GroupCardProps) {
           <div className="flex items-center gap-2">
             <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)] truncate">{group.name}</h3>
             {group.isPublic ? (
-              <Globe className="w-3.5 h-3.5 text-[var(--color-text-muted)] flex-shrink-0" title="Public group" />
+              <Globe className="w-3.5 h-3.5 text-[var(--color-text-muted)] flex-shrink-0" aria-label="Public group" />
             ) : (
-              <Lock className="w-3.5 h-3.5 text-[var(--color-text-muted)] flex-shrink-0" title="Private group" />
+              <Lock className="w-3.5 h-3.5 text-[var(--color-text-muted)] flex-shrink-0" aria-label="Private group" />
             )}
           </div>
           {group.description && (

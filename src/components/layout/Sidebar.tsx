@@ -20,6 +20,9 @@ export function Sidebar({ onNewChat, onJoinGroup, onSettings, onPendingWelcomes 
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const setActiveConversation = useChatStore((s) => s.setActiveConversation);
   const pendingWelcomes = useGroupStore((s) => s.pendingWelcomes);
+  const contactRequests = useGroupStore((s) => s.contactRequests);
+
+  const inviteBadgeCount = pendingWelcomes.length + contactRequests.length;
 
   const filteredConversations = conversations.filter((c) =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -116,7 +119,7 @@ export function Sidebar({ onNewChat, onJoinGroup, onSettings, onPendingWelcomes 
           icon={Inbox}
           label="Invites"
           onClick={onPendingWelcomes}
-          badge={pendingWelcomes.length > 0 ? pendingWelcomes.length : undefined}
+          badge={inviteBadgeCount > 0 ? inviteBadgeCount : undefined}
         />
         <ActionButton icon={Settings} label="Settings" onClick={onSettings} />
       </div>

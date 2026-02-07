@@ -284,15 +284,15 @@ impl MixnetMessage {
     }
 
     /// Request key package from another user for MLS group establishment
+    ///
+    /// The initiator no longer includes their own KP — only the responder's KP
+    /// is consumed by the Add proposal when the group is created.
     pub fn key_package_request(
         sender: &str,
         recipient: &str,
-        sender_key_package: &str,
         signature: &str,
     ) -> Self {
-        let payload = serde_json::json!({
-            "senderKeyPackage": sender_key_package
-        });
+        let payload = serde_json::json!({});
         Self {
             message_type: "system".into(),
             action: "keyPackageRequest".into(),
@@ -459,6 +459,22 @@ impl MixnetMessage {
         }
     }
 
+    /// Acknowledge receipt of pending messages
+    pub fn ack(username: &str, pending_ids: &[i64]) -> Self {
+        let payload = serde_json::json!({
+            "pendingIds": pending_ids
+        });
+        Self {
+            message_type: "message".into(),
+            action: "ack".into(),
+            sender: username.into(),
+            recipient: "server".into(),
+            payload,
+            signature: "placeholder".into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
     /// Update signature for a message
     pub fn set_signature(&mut self, signature: &str) {
         self.signature = signature.into();
@@ -576,6 +592,32 @@ impl MixnetMessage {
         Self {
             message_type: "system".into(),
             action: "welcomeAck".into(),
+            sender: sender.into(),
+            recipient: recipient.into(),
+            payload,
+            signature: signature.into(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Acknowledge receipt and processing of a P2P Welcome message for DM handshake
+    ///
+    /// Sent by Bob after he processes Alice's Welcome, so Alice can finalize
+    /// by applying her pending commit.
+    pub fn p2p_welcome_ack(
+        sender: &str,
+        recipient: &str,
+        conversation_id: &str,
+        accepted: bool,
+        signature: &str,
+    ) -> Self {
+        let payload = serde_json::json!({
+            "conversationId": conversation_id,
+            "accepted": accepted
+        });
+        Self {
+            message_type: "system".into(),
+            action: "p2pWelcomeAck".into(),
             sender: sender.into(),
             recipient: recipient.into(),
             payload,

@@ -352,6 +352,36 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
+    // Contact requests table - incoming DM requests pending user action
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS contact_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_username TEXT NOT NULL,
+            key_package TEXT NOT NULL,
+            received_at TEXT NOT NULL DEFAULT (datetime('now')),
+            status TEXT NOT NULL DEFAULT 'pending',
+            UNIQUE(from_username)
+        )
+        "#,
+    )
+    .execute(db)
+    .await?;
+
+    // Pending handshakes table - tracks DM handshakes awaiting p2pWelcomeAck
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS pending_handshakes (
+            recipient TEXT PRIMARY KEY,
+            mls_group_id TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        "#,
+    )
+    .execute(db)
+    .await?;
+
     Ok(())
 }
 
@@ -403,6 +433,11 @@ async fn create_indexes(db: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // Group cursors index
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_group_cursors_user ON group_cursors(username)")
+        .execute(db)
+        .await?;
+
+    // Contact requests index
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_contact_requests_status ON contact_requests(status)")
         .execute(db)
         .await?;
 

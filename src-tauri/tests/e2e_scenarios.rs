@@ -73,7 +73,6 @@ async fn test_dm_handshake_flow() -> Result<()> {
     let kp_request = MixnetMessage::key_package_request(
         "alice",
         "bob",
-        "alice_key_package",
         "signature",
     );
     assert_eq!(kp_request.action, "keyPackageRequest");

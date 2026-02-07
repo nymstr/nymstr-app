@@ -110,6 +110,11 @@ pub fn run() {
             commands::get_pending_join_requests,
             commands::get_group_members,
             commands::get_current_user_role,
+            // Invite commands
+            commands::get_contact_requests,
+            commands::accept_contact_request,
+            commands::deny_contact_request,
+            commands::deny_welcome,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

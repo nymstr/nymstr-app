@@ -26,6 +26,8 @@ pub struct GroupMessageHandler {
     pub pgp_passphrase: Option<ArcPassphrase>,
     /// MLS storage path
     pub mls_storage_path: Option<std::path::PathBuf>,
+    /// Shared MLS client from AppState (maintains state across messages)
+    pub mls_client: Option<Arc<MlsClient>>,
 }
 
 impl GroupMessageHandler {
@@ -38,6 +40,7 @@ impl GroupMessageHandler {
         pgp_public_key: Option<ArcPublicKey>,
         pgp_passphrase: Option<ArcPassphrase>,
         mls_storage_path: Option<std::path::PathBuf>,
+        mls_client: Option<Arc<MlsClient>>,
     ) -> Self {
         Self {
             db,
@@ -47,6 +50,7 @@ impl GroupMessageHandler {
             pgp_public_key,
             pgp_passphrase,
             mls_storage_path,
+            mls_client,
         }
     }
 
@@ -122,28 +126,18 @@ impl GroupMessageHandler {
             .as_deref()
             .ok_or_else(|| anyhow!("No user logged in"))?;
 
-        // Get PGP keys for MLS client and signing
-        let (secret_key, public_key, passphrase) =
-            match (&self.pgp_secret_key, &self.pgp_public_key, &self.pgp_passphrase) {
-                (Some(sk), Some(pk), Some(pp)) => {
-                    (Arc::clone(sk), Arc::clone(pk), Arc::clone(pp))
+        // Get PGP keys for signing
+        let (secret_key, passphrase) =
+            match (&self.pgp_secret_key, &self.pgp_passphrase) {
+                (Some(sk), Some(pp)) => {
+                    (Arc::clone(sk), Arc::clone(pp))
                 }
                 _ => return Err(anyhow!("PGP keys not available")),
             };
 
-        let storage_path = self
-            .mls_storage_path
-            .clone()
-            .ok_or_else(|| anyhow!("MLS storage path not set"))?;
-
-        // Create MLS client and encrypt the message
-        let mls_client = MlsClient::new(
-            sender,
-            Arc::clone(&secret_key),
-            Arc::clone(&public_key),
-            &passphrase,
-            storage_path,
-        )?;
+        // Use shared MLS client
+        let mls_client = self.mls_client.as_ref()
+            .ok_or_else(|| anyhow!("MLS client not available"))?;
 
         // Look up the actual MLS group ID from the database
         let mls_group_id = self
@@ -305,12 +299,17 @@ impl GroupMessageHandler {
                     return Ok(vec![]);
                 }
 
-                // Get all groups the user is a member of
-                let groups = mls_manager.get_user_groups().await.unwrap_or_default();
-                if groups.is_empty() {
-                    log::warn!("No groups found for user {}, cannot decrypt messages", user);
-                    return Ok(vec![]);
-                }
+                // Look up the MLS group ID for this group server using targeted lookup
+                let group_server_address = &envelope.sender;
+                let mls_group_id = self
+                    .get_mls_group_id_by_server(user, group_server_address)
+                    .await?
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "No MLS group found for server {}. Did you join the group first?",
+                            group_server_address
+                        )
+                    })?;
 
                 let mut decrypted_messages = Vec::new();
 
@@ -325,19 +324,27 @@ impl GroupMessageHandler {
                         continue;
                     }
 
-                    match Self::try_decrypt_with_any_group(mls_manager, &groups, sender, ciphertext)
+                    // Decrypt using the specific MLS group ID
+                    match mls_manager
+                        .process_incoming_message_buffered(&mls_group_id, sender, ciphertext)
                         .await
                     {
-                        Ok(Some((sender, text))) => {
-                            decrypted_messages.push((sender, text));
+                        Ok(Some((s, text))) => {
+                            decrypted_messages.push((s, text));
                         }
                         Ok(None) => {
-                            // Message was buffered - already logged in helper
+                            log::info!(
+                                "Group message from {} buffered for group {} (epoch mismatch)",
+                                sender,
+                                mls_group_id
+                            );
                         }
-                        Err(()) => {
+                        Err(e) => {
                             log::warn!(
-                                "Could not decrypt message from {} with any known group",
-                                sender
+                                "Failed to decrypt message from {} in group {}: {}",
+                                sender,
+                                mls_group_id,
+                                e
                             );
                         }
                     }
@@ -384,36 +391,4 @@ impl GroupMessageHandler {
         }
     }
 
-    /// Attempts to decrypt a message using any of the user's known groups.
-    async fn try_decrypt_with_any_group(
-        mls_manager: &mut MlsConversationManager,
-        groups: &[String],
-        sender: &str,
-        ciphertext: &str,
-    ) -> std::result::Result<Option<(String, String)>, ()> {
-        for group_id in groups {
-            match mls_manager
-                .process_incoming_message_buffered(group_id, sender, ciphertext)
-                .await
-            {
-                Ok(Some((_, text))) => {
-                    return Ok(Some((sender.to_string(), text)));
-                }
-                Ok(None) => {
-                    // Message was buffered for later - epoch mismatch
-                    log::info!(
-                        "Group message from {} buffered for group {} (epoch mismatch)",
-                        sender,
-                        group_id
-                    );
-                    return Ok(None); // Consider it handled (buffered)
-                }
-                Err(e) => {
-                    // Try next group - this one didn't work
-                    log::debug!("Failed to decrypt with group {}: {}", group_id, e);
-                }
-            }
-        }
-        Err(())
-    }
 }

@@ -50,6 +50,13 @@ export interface PendingWelcome {
   receivedAt: string;
 }
 
+// ContactRequest type for incoming DM requests
+export interface ContactRequest {
+  id: number;
+  fromUsername: string;
+  receivedAt: string;
+}
+
 // Conversation type
 export type ConversationType = 'direct' | 'group';
 
@@ -119,6 +126,7 @@ export type AppEvent =
   | { type: 'GroupInviteReceived'; payload: { groupId: string; groupName?: string; sender: string } }
   | { type: 'ContactOnline'; payload: { username: string; online: boolean } }
   | { type: 'SystemNotification'; payload: { message: string } }
+  | { type: 'ContactRequestReceived'; payload: { username: string } }
   | { type: 'BackgroundTasksStarted'; payload: Record<string, never> }
   | { type: 'BackgroundTasksStopped'; payload: Record<string, never> };
 

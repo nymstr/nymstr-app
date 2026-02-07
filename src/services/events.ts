@@ -12,6 +12,7 @@ type WelcomeCallback = (groupId: string, sender: string, groupName?: string) => 
 type ContactStatusCallback = (username: string, online: boolean) => void;
 type SystemCallback = (message: string) => void;
 type BackgroundTasksCallback = (started: boolean) => void;
+type ContactRequestCallback = (username: string) => void;
 
 export interface AppEventCallbacks {
   onMessage?: MessageCallback;
@@ -23,6 +24,7 @@ export interface AppEventCallbacks {
   onGroupMessages?: GroupMessagesCallback;
   onWelcome?: WelcomeCallback;
   onGroupInvite?: WelcomeCallback;
+  onContactRequest?: ContactRequestCallback;
   onContactStatus?: ContactStatusCallback;
   onSystem?: SystemCallback;
   onBackgroundTasks?: BackgroundTasksCallback;
@@ -105,6 +107,11 @@ export async function onAppEvent(callbacks: AppEventCallbacks): Promise<Unlisten
 
       case 'GroupInviteReceived':
         callbacks.onGroupInvite?.(payload.groupId, payload.sender, payload.groupName);
+        break;
+
+      // Contact request event (DM invite)
+      case 'ContactRequestReceived':
+        callbacks.onContactRequest?.(payload.username);
         break;
 
       // Contact status event

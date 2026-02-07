@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import type { Group, PendingWelcome, PendingJoinRequest } from '../types';
+import type { Group, PendingWelcome, ContactRequest } from '../types';
 
 interface GroupStore {
   // Data
   discoveredGroups: Group[];
   joinedGroups: Group[];
   pendingWelcomes: PendingWelcome[];
+  contactRequests: ContactRequest[];
 
   // Admin-related: pending join requests per group
   pendingJoinRequests: Map<string, string[]>;
@@ -41,6 +42,10 @@ interface GroupStore {
   addPendingWelcome: (welcome: PendingWelcome) => void;
   removePendingWelcome: (id: number) => void;
 
+  setContactRequests: (requests: ContactRequest[]) => void;
+  addContactRequest: (request: ContactRequest) => void;
+  removeContactRequest: (id: number) => void;
+
   setProcessingWelcome: (id: number, processing: boolean) => void;
 
   setDiscovering: (loading: boolean) => void;
@@ -66,6 +71,7 @@ const initialState = {
   discoveredGroups: [],
   joinedGroups: [],
   pendingWelcomes: [],
+  contactRequests: [] as ContactRequest[],
   pendingJoinRequests: new Map<string, string[]>(),
   approvingUsers: new Set<string>(),
   denyingUsers: new Set<string>(),
@@ -137,6 +143,19 @@ export const useGroupStore = create<GroupStore>((set) => ({
       pendingWelcomes: state.pendingWelcomes.filter((w) => w.id !== id),
     })),
 
+  // Contact requests actions (DM invite requests)
+  setContactRequests: (requests) => set({ contactRequests: requests }),
+
+  addContactRequest: (request) =>
+    set((state) => ({
+      contactRequests: [...state.contactRequests.filter((r) => r.id !== request.id), request],
+    })),
+
+  removeContactRequest: (id) =>
+    set((state) => ({
+      contactRequests: state.contactRequests.filter((r) => r.id !== id),
+    })),
+
   // Processing welcomes (welcomes currently being processed)
   setProcessingWelcome: (id, processing) =>
     set((state) => {
@@ -200,14 +219,14 @@ export const useGroupStore = create<GroupStore>((set) => ({
       return { userRoles: newMap };
     }),
 
-  getUserRole: (groupAddress) => {
+  getUserRole: (_groupAddress) => {
     // This is a getter, we need to access the store state
     // For zustand, getters should be defined differently
     // This will be handled in the component
     return undefined;
   },
 
-  isAdmin: (groupAddress) => {
+  isAdmin: (_groupAddress) => {
     // Same issue - this should be used in components via selector
     return false;
   },
@@ -216,6 +235,7 @@ export const useGroupStore = create<GroupStore>((set) => ({
   reset: () =>
     set({
       ...initialState,
+      contactRequests: [],
       joiningGroups: new Set<string>(),
       pendingApprovals: new Set<string>(),
       processingWelcomes: new Set<number>(),

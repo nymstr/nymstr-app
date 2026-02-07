@@ -308,6 +308,12 @@ impl MixnetService {
         self.send_to_server(&env).await
     }
 
+    /// Acknowledge receipt of pending messages so the server can delete them
+    pub async fn send_ack(&self, username: &str, pending_ids: &[i64]) -> Result<()> {
+        let env = MixnetMessage::ack(username, pending_ids);
+        self.send_to_server(&env).await
+    }
+
     // ========== Direct Messaging Methods ==========
 
     /// Send a message via the discovery server for routing
@@ -374,10 +380,9 @@ impl MixnetService {
         &self,
         sender: &str,
         recipient: &str,
-        sender_key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        let env = MixnetMessage::key_package_request(sender, recipient, sender_key_package, signature);
+        let env = MixnetMessage::key_package_request(sender, recipient, signature);
         log::info!("Sending key package request to {} via server", recipient);
         self.send_to_server(&env).await?;
         log::info!("Key package request sent successfully");
@@ -410,25 +415,34 @@ impl MixnetService {
     ///
     /// This is used for establishing 1:1 encrypted conversations. The welcome
     /// is relayed through the discovery server since users haven't exchanged
-    /// direct addresses yet.
+    /// direct addresses yet. Includes the commit message and ratchet tree
+    /// alongside the welcome per RFC 9420.
     pub async fn send_p2p_welcome(
         &self,
         sender: &str,
         recipient: &str,
         welcome_b64: &str,
         group_id: &str,
+        commit_b64: Option<&str>,
+        ratchet_tree_b64: Option<&str>,
         signature: &str,
     ) -> Result<()> {
-        // Use a simple payload format for P2P welcome relay
+        let mut inner_payload = serde_json::json!({
+            "welcomeMessage": welcome_b64,
+            "groupId": group_id
+        });
+        if let Some(commit) = commit_b64 {
+            inner_payload["commitMessage"] = serde_json::json!(commit);
+        }
+        if let Some(rt) = ratchet_tree_b64 {
+            inner_payload["ratchetTree"] = serde_json::json!(rt);
+        }
         let payload = serde_json::json!({
             "type": "system",
             "action": "p2pWelcome",
             "sender": sender,
             "recipient": recipient,
-            "payload": {
-                "welcomeMessage": welcome_b64,
-                "groupId": group_id
-            },
+            "payload": inner_payload,
             "signature": signature,
             "timestamp": chrono::Utc::now().to_rfc3339()
         });
@@ -438,6 +452,25 @@ impl MixnetService {
             .context("Server address not configured")?;
         self.send_raw(&server_addr, payload.to_string().into_bytes()).await?;
         log::info!("P2P welcome sent successfully");
+        Ok(())
+    }
+
+    /// Send P2P welcome acknowledgment for DM handshake finalization
+    ///
+    /// Sent by the Welcome recipient back to the initiator so the initiator
+    /// can apply their pending commit and finalize the conversation.
+    pub async fn send_p2p_welcome_ack(
+        &self,
+        sender: &str,
+        recipient: &str,
+        conversation_id: &str,
+        accepted: bool,
+        signature: &str,
+    ) -> Result<()> {
+        let env = MixnetMessage::p2p_welcome_ack(sender, recipient, conversation_id, accepted, signature);
+        log::info!("Sending P2P welcome ack to {} via server", recipient);
+        self.send_to_server(&env).await?;
+        log::info!("P2P welcome ack sent successfully");
         Ok(())
     }
 
@@ -860,6 +893,10 @@ impl MixnetSender for MixnetService {
         MixnetService::send_fetch_pending(self, username, timestamp, signature).await
     }
 
+    async fn send_ack(&self, username: &str, pending_ids: &[i64]) -> Result<()> {
+        MixnetService::send_ack(self, username, pending_ids).await
+    }
+
     async fn send_message_via_server(
         &self,
         sender: &str,
@@ -896,10 +933,9 @@ impl MixnetSender for MixnetService {
         &self,
         sender: &str,
         recipient: &str,
-        sender_key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        MixnetService::send_key_package_request(self, sender, recipient, sender_key_package, signature).await
+        MixnetService::send_key_package_request(self, sender, recipient, signature).await
     }
 
     async fn send_key_package_response(
@@ -926,9 +962,22 @@ impl MixnetSender for MixnetService {
         recipient: &str,
         welcome_b64: &str,
         group_id: &str,
+        commit_b64: Option<&str>,
+        ratchet_tree_b64: Option<&str>,
         signature: &str,
     ) -> Result<()> {
-        MixnetService::send_p2p_welcome(self, sender, recipient, welcome_b64, group_id, signature).await
+        MixnetService::send_p2p_welcome(self, sender, recipient, welcome_b64, group_id, commit_b64, ratchet_tree_b64, signature).await
+    }
+
+    async fn send_p2p_welcome_ack(
+        &self,
+        sender: &str,
+        recipient: &str,
+        conversation_id: &str,
+        accepted: bool,
+        signature: &str,
+    ) -> Result<()> {
+        MixnetService::send_p2p_welcome_ack(self, sender, recipient, conversation_id, accepted, signature).await
     }
 
     async fn send_group_join_response(

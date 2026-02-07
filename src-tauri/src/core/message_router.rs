@@ -42,8 +42,10 @@ impl MessageRouter {
                 MessageRoute::Authentication
             }
 
-            // MLS protocol messages (key package exchange)
-            "keyPackageRequest" | "keyPackageResponse" | "p2pWelcome" => MessageRoute::MlsProtocol,
+            // MLS protocol messages (key package exchange, DM handshake)
+            "keyPackageRequest" | "keyPackageResponse" | "p2pWelcome" | "p2pWelcomeAck" => {
+                MessageRoute::MlsProtocol
+            }
 
             // MLS Welcome flow messages (group invitation and joining)
             "mlsWelcome" | "groupInvite" | "groupJoinRequest" | "welcomeAck"
@@ -108,8 +110,10 @@ impl MessageRouter {
                 MessageRoute::Authentication
             }
 
-            // MLS protocol messages (key package exchange)
-            "keyPackageRequest" | "keyPackageResponse" | "p2pWelcome" => MessageRoute::MlsProtocol,
+            // MLS protocol messages (key package exchange, DM handshake)
+            "keyPackageRequest" | "keyPackageResponse" | "p2pWelcome" | "p2pWelcomeAck" => {
+                MessageRoute::MlsProtocol
+            }
 
             // MLS Welcome flow messages (group invitation and joining)
             "mlsWelcome" | "groupInvite" | "groupJoinRequest" | "welcomeAck"

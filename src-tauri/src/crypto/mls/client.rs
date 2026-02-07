@@ -455,25 +455,21 @@ impl MlsClient {
             .build()
             .map_err(|e| anyhow!("Failed to build commit: {}", e))?;
 
-        // Apply the pending commit locally
-        log::info!(
-            "Applying pending commit for conversation {} (user: {})",
-            conversation_id_str,
-            self.identity
-        );
-        group.apply_pending_commit().map_err(|e| {
-            anyhow!(
-                "Failed to apply pending commit for user {} in conversation {}: {}",
-                self.identity,
-                conversation_id_str,
-                e
-            )
-        })?;
-
-        // Save the group state
+        // Do NOT apply the pending commit yet — wait for the other party's ack.
+        // The group is saved with the pending commit so it survives restarts.
         group
             .write_to_storage()
             .map_err(|e| anyhow!("Failed to save group state: {}", e))?;
+
+        // Export ratchet tree for the welcome recipient
+        let exported_tree = group.export_tree().to_bytes()
+            .map_err(|e| anyhow!("Failed to export ratchet tree: {}", e))?;
+
+        // Serialize commit message for deferred application
+        let commit_bytes = commit_result
+            .commit_message
+            .to_bytes()
+            .map_err(|e| anyhow!("Failed to serialize commit message: {}", e))?;
 
         // Extract welcome message for the recipient
         let welcome_message = if !commit_result.welcome_messages.is_empty() {
@@ -487,7 +483,7 @@ impl MlsClient {
         };
 
         log::info!(
-            "Successfully created MLS conversation {} with recipient",
+            "Successfully created MLS conversation {} with recipient (commit deferred)",
             conversation_id_str
         );
 
@@ -496,10 +492,12 @@ impl MlsClient {
             conversation_type: ConversationType::OneToOne,
             participants: 2,
             welcome_message,
+            commit_message: Some(commit_bytes),
             group_info: MlsGroupInfo {
                 group_id,
                 client_identity: self.identity.clone(),
             },
+            ratchet_tree: Some(exported_tree),
         })
     }
 
@@ -537,11 +535,54 @@ impl MlsClient {
             conversation_type: ConversationType::OneToOne,
             participants: participant_count,
             welcome_message: None,
+            commit_message: None,
             group_info: MlsGroupInfo {
                 group_id,
                 client_identity: self.identity.clone(),
             },
+            ratchet_tree: None,
         })
+    }
+
+    /// Apply a previously-built pending commit after the other party confirms.
+    /// Call this after receiving p2pWelcomeAck.
+    pub fn apply_pending_commit_for_group(&self, group_id: &[u8]) -> Result<u64> {
+        let group_id_str = base64::engine::general_purpose::STANDARD.encode(group_id);
+        log::info!(
+            "Applying deferred pending commit for group {} (user: {})",
+            group_id_str,
+            self.identity
+        );
+
+        let client = self.create_client()?;
+        let mut group = client.load_group(group_id).map_err(|e| {
+            anyhow!(
+                "Failed to load MLS group {} for pending commit: {}",
+                group_id_str,
+                e
+            )
+        })?;
+
+        group.apply_pending_commit().map_err(|e| {
+            anyhow!(
+                "Failed to apply pending commit for group {}: {}",
+                group_id_str,
+                e
+            )
+        })?;
+
+        group
+            .write_to_storage()
+            .map_err(|e| anyhow!("Failed to save group state after applying pending commit: {}", e))?;
+
+        let epoch = group.current_epoch();
+        log::info!(
+            "Pending commit applied for group {}, now at epoch {}",
+            group_id_str,
+            epoch
+        );
+
+        Ok(epoch)
     }
 
     /// Encrypt message for any conversation using persistent group state
@@ -965,6 +1006,10 @@ impl MlsClient {
             .write_to_storage()
             .map_err(|e| anyhow!("Failed to save group state: {}", e))?;
 
+        // Export ratchet tree for the welcome recipient
+        let exported_tree_bytes = group.export_tree().to_bytes()
+            .map_err(|e| anyhow!("Failed to export ratchet tree: {}", e))?;
+
         if commit_result.welcome_messages.is_empty() {
             return Err(anyhow!("No welcome message generated for new member"));
         }
@@ -980,7 +1025,7 @@ impl MlsClient {
             group_id,
             cipher_suite_value,
             &welcome_bytes,
-            None,
+            Some(&exported_tree_bytes),
             epoch,
             &self.identity,
         );

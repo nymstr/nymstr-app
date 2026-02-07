@@ -17,8 +17,8 @@ pub struct BufferedMessage {
     pub mls_message_b64: String,
     pub received_at: String,
     pub retry_count: i32,
-    pub last_retry_at: Option<String>,
-    pub status: String,
+    pub processed: bool,
+    pub failed: bool,
     pub error_message: Option<String>,
 }
 
@@ -164,8 +164,8 @@ impl MessageDb {
         sqlx::query(
             r#"
             INSERT OR IGNORE INTO pending_mls_messages
-            (conversation_id, sender, mls_message_b64, received_at, status)
-            VALUES (?, ?, ?, ?, 'pending')
+            (conversation_id, sender, mls_message_b64, received_at)
+            VALUES (?, ?, ?, ?)
             "#,
         )
         .bind(&msg.conversation_id)
@@ -189,9 +189,9 @@ impl MessageDb {
     ) -> Result<Vec<BufferedMessage>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, conversation_id, sender, mls_message_b64, received_at, retry_count, last_retry_at, status, error_message
+            SELECT id, conversation_id, sender, mls_message_b64, received_at, retry_count, processed, failed, error_message
             FROM pending_mls_messages
-            WHERE conversation_id = ? AND status = 'pending'
+            WHERE conversation_id = ? AND processed = 0 AND failed = 0
             ORDER BY received_at ASC
             "#,
         )
@@ -208,8 +208,8 @@ impl MessageDb {
                 mls_message_b64: r.try_get("mls_message_b64")?,
                 received_at: r.try_get("received_at")?,
                 retry_count: r.try_get("retry_count")?,
-                last_retry_at: r.try_get("last_retry_at")?,
-                status: r.try_get("status")?,
+                processed: r.try_get::<i32, _>("processed")? != 0,
+                failed: r.try_get::<i32, _>("failed")? != 0,
                 error_message: r.try_get("error_message")?,
             });
         }
@@ -222,7 +222,7 @@ impl MessageDb {
             r#"
             SELECT DISTINCT conversation_id
             FROM pending_mls_messages
-            WHERE status = 'pending'
+            WHERE processed = 0 AND failed = 0
             "#,
         )
         .fetch_all(pool)
@@ -246,7 +246,7 @@ impl MessageDb {
 
     /// Mark a buffered message as processed
     pub async fn mark_buffered_processed(pool: &SqlitePool, id: i64) -> Result<()> {
-        sqlx::query("UPDATE pending_mls_messages SET status = 'processed' WHERE id = ?")
+        sqlx::query("UPDATE pending_mls_messages SET processed = 1 WHERE id = ?")
             .bind(id)
             .execute(pool)
             .await?;
@@ -257,7 +257,7 @@ impl MessageDb {
     /// Mark a buffered message as failed with error
     pub async fn mark_buffered_failed(pool: &SqlitePool, id: i64, error: &str) -> Result<()> {
         sqlx::query(
-            "UPDATE pending_mls_messages SET status = 'failed', error_message = ? WHERE id = ?",
+            "UPDATE pending_mls_messages SET failed = 1, error_message = ? WHERE id = ?",
         )
         .bind(error)
         .bind(id)
@@ -272,7 +272,7 @@ impl MessageDb {
         sqlx::query(
             r#"
             UPDATE pending_mls_messages
-            SET retry_count = retry_count + 1, last_retry_at = datetime('now')
+            SET retry_count = retry_count + 1
             WHERE id = ?
             "#,
         )
@@ -289,7 +289,7 @@ impl MessageDb {
             r#"
             DELETE FROM pending_mls_messages
             WHERE datetime(received_at) < datetime('now', ? || ' seconds')
-               OR status IN ('processed', 'failed')
+               OR processed = 1 OR failed = 1
             "#,
         )
         .bind(-max_age_secs)
@@ -350,14 +350,14 @@ mod tests {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS pending_mls_messages (
-                id INTEGER PRIMARY KEY,
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 conversation_id TEXT NOT NULL,
                 sender TEXT NOT NULL,
                 mls_message_b64 TEXT NOT NULL,
-                received_at TEXT DEFAULT (datetime('now')),
-                retry_count INTEGER DEFAULT 0,
-                last_retry_at TEXT,
-                status TEXT DEFAULT 'pending',
+                received_at TEXT NOT NULL DEFAULT (datetime('now')),
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                processed INTEGER NOT NULL DEFAULT 0,
+                failed INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT
             )
             "#,
@@ -399,8 +399,8 @@ mod tests {
             mls_message_b64: "base64data".to_string(),
             received_at: "2026-01-18T12:00:00Z".to_string(),
             retry_count: 0,
-            last_retry_at: None,
-            status: "pending".to_string(),
+            processed: false,
+            failed: false,
             error_message: None,
         };
 

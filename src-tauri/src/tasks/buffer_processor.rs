@@ -116,6 +116,7 @@ async fn process_buffered_messages(
         .mixnet_service(mixnet_service)
         .pgp_keys(pgp_secret_key, pgp_passphrase)
         .current_user(username.to_string())
+        .db(state.db.clone())
         .build()?;
 
     // Process each conversation

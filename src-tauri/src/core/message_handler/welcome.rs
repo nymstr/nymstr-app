@@ -618,6 +618,30 @@ impl WelcomeFlowHandler {
             )
             .await?;
 
+        // Send Commit to group server for distribution to existing members
+        let commit_signature = PgpSigner::sign_detached_secure(
+            &secret_key,
+            format!("{}:{}", group_id, add_result.new_epoch).as_bytes(),
+            &passphrase,
+        )?;
+
+        self.service
+            .buffer_commit_on_server(
+                user,
+                group_id,
+                add_result.new_epoch as i64,
+                &add_result.commit_bytes,
+                &commit_signature,
+                &group_server_address,
+            )
+            .await?;
+
+        log::info!(
+            "Sent Commit to group server {} for epoch {}",
+            group_server_address,
+            add_result.new_epoch
+        );
+
         // Update join request status if one exists
         sqlx::query("UPDATE join_requests SET status = 'approved' WHERE group_id = ? AND sender = ?")
             .bind(group_id)
@@ -627,7 +651,7 @@ impl WelcomeFlowHandler {
             .ok(); // Ignore errors if no request exists
 
         log::info!(
-            "Added {} to group {} and sent Welcome via group server {}",
+            "Added {} to group {} and sent Welcome + Commit via group server {}",
             new_member,
             group_id,
             group_server_address

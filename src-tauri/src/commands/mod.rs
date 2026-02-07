@@ -7,9 +7,11 @@ mod messaging;
 mod contacts;
 mod groups;
 mod connection;
+mod invites;
 
 pub use auth::*;
 pub use messaging::*;
 pub use contacts::*;
 pub use groups::*;
 pub use connection::*;
+pub use invites::*;

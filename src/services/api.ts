@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { User, Contact, Message, Group, ConnectionStatus, PendingWelcome } from '../types';
+import type { User, Contact, Message, Group, ConnectionStatus, PendingWelcome, ContactRequest } from '../types';
 
 // ============================================================================
 // Authentication
@@ -255,4 +255,24 @@ export async function getGroupMembers(groupAddress: string): Promise<GroupMember
  */
 export async function getCurrentUserRole(groupAddress: string): Promise<string | null> {
   return invoke('get_current_user_role', { groupAddress });
+}
+
+// ============================================================================
+// Invites (DM Contact Requests + Group Welcome Deny)
+// ============================================================================
+
+export async function getContactRequests(): Promise<ContactRequest[]> {
+  return invoke('get_contact_requests');
+}
+
+export async function acceptContactRequest(fromUsername: string): Promise<{ conversationId: string; fromUsername: string }> {
+  return invoke('accept_contact_request', { fromUsername });
+}
+
+export async function denyContactRequest(fromUsername: string): Promise<void> {
+  return invoke('deny_contact_request', { fromUsername });
+}
+
+export async function denyWelcome(welcomeId: number): Promise<void> {
+  return invoke('deny_welcome', { welcomeId });
 }

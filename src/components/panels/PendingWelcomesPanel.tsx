@@ -1,11 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
-import { X, Users, Loader2, Check, AlertCircle, Inbox, RefreshCw } from 'lucide-react';
+import { X, Users, Loader2, Check, AlertCircle, Inbox, RefreshCw, MessageSquare, XCircle } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Avatar } from '../ui/Avatar';
 import * as api from '../../services/api';
 import { useGroupStore } from '../../stores/groupStore';
 import { useChatStore } from '../../stores/chatStore';
-import type { PendingWelcome } from '../../types';
+import type { PendingWelcome, ContactRequest } from '../../types';
+
+/** Extract error message from Tauri invoke errors (serialized ApiError objects) */
+function extractError(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    return String((err as { message: unknown }).message);
+  }
+  if (typeof err === 'string') return err;
+  return fallback;
+}
 
 interface PendingWelcomesPanelProps {
   isOpen: boolean;
@@ -16,22 +26,30 @@ export function PendingWelcomesPanel({ isOpen, onClose }: PendingWelcomesPanelPr
   const pendingWelcomes = useGroupStore((s) => s.pendingWelcomes);
   const setPendingWelcomes = useGroupStore((s) => s.setPendingWelcomes);
   const processingWelcomes = useGroupStore((s) => s.processingWelcomes);
+  const contactRequests = useGroupStore((s) => s.contactRequests);
+  const setContactRequests = useGroupStore((s) => s.setContactRequests);
 
-  // Fetch welcomes on mount/open
-  const fetchWelcomes = useCallback(async () => {
+  const totalCount = pendingWelcomes.length + contactRequests.length;
+
+  // Fetch both types on mount/open
+  const fetchAll = useCallback(async () => {
     try {
-      const welcomes = await api.getPendingWelcomes();
+      const [welcomes, requests] = await Promise.all([
+        api.getPendingWelcomes(),
+        api.getContactRequests(),
+      ]);
       setPendingWelcomes(welcomes);
+      setContactRequests(requests);
     } catch (error) {
-      console.error('Failed to fetch pending welcomes:', error);
+      console.error('Failed to fetch invites:', error);
     }
-  }, [setPendingWelcomes]);
+  }, [setPendingWelcomes, setContactRequests]);
 
   useEffect(() => {
     if (isOpen) {
-      fetchWelcomes();
+      fetchAll();
     }
-  }, [isOpen, fetchWelcomes]);
+  }, [isOpen, fetchAll]);
 
   if (!isOpen) return null;
 
@@ -40,14 +58,14 @@ export function PendingWelcomesPanel({ isOpen, onClose }: PendingWelcomesPanelPr
       {/* Header */}
       <div className="p-4 border-b border-[var(--color-border)] flex items-center justify-between">
         <div>
-          <h3 className="font-semibold text-[var(--color-text-primary)]">Group Invites</h3>
+          <h3 className="font-semibold text-[var(--color-text-primary)]">Invites</h3>
           <p className="text-xs text-[var(--color-text-muted)]">
-            {pendingWelcomes.length} pending
+            {totalCount} pending
           </p>
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={fetchWelcomes}
+            onClick={fetchAll}
             className="p-1.5 rounded-lg hover:bg-[var(--color-bg-hover)] transition-colors"
             title="Refresh"
           >
@@ -62,26 +80,58 @@ export function PendingWelcomesPanel({ isOpen, onClose }: PendingWelcomesPanelPr
         </div>
       </div>
 
-      {/* Welcome list */}
+      {/* Invite list */}
       <div className="flex-1 overflow-y-auto">
-        {pendingWelcomes.length === 0 ? (
+        {totalCount === 0 ? (
           <div className="flex flex-col items-center justify-center h-full p-4 text-center">
             <Inbox className="w-12 h-12 text-[var(--color-text-muted)] opacity-50 mb-4" />
             <p className="text-[var(--color-text-secondary)]">No pending invites</p>
             <p className="text-xs text-[var(--color-text-muted)] mt-1">
-              Group invites will appear here
+              Message requests and group invites will appear here
             </p>
           </div>
         ) : (
           <div className="p-4 space-y-3">
-            {pendingWelcomes.map((welcome) => (
-              <WelcomeCard
-                key={welcome.id}
-                welcome={welcome}
-                isProcessing={processingWelcomes.has(welcome.id)}
-                onAccepted={fetchWelcomes}
-              />
-            ))}
+            {/* Message Requests Section */}
+            {contactRequests.length > 0 && (
+              <>
+                {pendingWelcomes.length > 0 && (
+                  <div className="px-1 py-1">
+                    <span className="text-[11px] font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+                      Message Requests
+                    </span>
+                  </div>
+                )}
+                {contactRequests.map((request) => (
+                  <ContactRequestCard
+                    key={request.id}
+                    request={request}
+                    onHandled={fetchAll}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Group Invites Section */}
+            {pendingWelcomes.length > 0 && (
+              <>
+                {contactRequests.length > 0 && (
+                  <div className="px-1 py-1 mt-2">
+                    <span className="text-[11px] font-medium text-[var(--color-text-muted)] uppercase tracking-wider">
+                      Group Invites
+                    </span>
+                  </div>
+                )}
+                {pendingWelcomes.map((welcome) => (
+                  <WelcomeCard
+                    key={welcome.id}
+                    welcome={welcome}
+                    isProcessing={processingWelcomes.has(welcome.id)}
+                    onHandled={fetchAll}
+                  />
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -89,13 +139,145 @@ export function PendingWelcomesPanel({ isOpen, onClose }: PendingWelcomesPanelPr
   );
 }
 
+// ============================================================================
+// Contact Request Card (DM invite)
+// ============================================================================
+
+interface ContactRequestCardProps {
+  request: ContactRequest;
+  onHandled: () => void;
+}
+
+function ContactRequestCard({ request, onHandled }: ContactRequestCardProps) {
+  const removeContactRequest = useGroupStore((s) => s.removeContactRequest);
+  const addConversation = useChatStore((s) => s.addConversation);
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const [isAccepting, setIsAccepting] = useState(false);
+  const [isDenying, setIsDenying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const handleAccept = async () => {
+    setError(null);
+    setIsAccepting(true);
+
+    try {
+      const { conversationId, fromUsername } = await api.acceptContactRequest(request.fromUsername);
+      setSuccess(true);
+      removeContactRequest(request.id);
+
+      // Add the conversation to the sidebar
+      addConversation({
+        id: conversationId,
+        type: 'direct',
+        name: fromUsername,
+        unreadCount: 0,
+      });
+
+      // Navigate to the conversation after a brief delay
+      setTimeout(() => {
+        setActiveConversation(conversationId);
+        onHandled();
+      }, 500);
+    } catch (err) {
+      console.error('Accept contact request failed:', err);
+      setError(extractError(err, 'Failed to accept request'));
+    } finally {
+      setIsAccepting(false);
+    }
+  };
+
+  const handleDeny = async () => {
+    setError(null);
+    setIsDenying(true);
+
+    try {
+      await api.denyContactRequest(request.fromUsername);
+      removeContactRequest(request.id);
+      onHandled();
+    } catch (err) {
+      setError(extractError(err, 'Failed to deny request'));
+    } finally {
+      setIsDenying(false);
+    }
+  };
+
+  return (
+    <div className="p-4 rounded-lg bg-[var(--color-bg-tertiary)] border border-[var(--color-border)]">
+      <div className="flex items-start gap-3">
+        <Avatar fallback={request.fromUsername} />
+        <div className="flex-1 min-w-0">
+          <h4 className="font-medium truncate">{request.fromUsername}</h4>
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Wants to message you
+          </p>
+          <p className="text-xs text-[var(--color-text-muted)] mt-1">
+            {formatRelativeTime(request.receivedAt)}
+          </p>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-3 p-2 rounded bg-[var(--color-error)]/10 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-[var(--color-error)] flex-shrink-0 mt-0.5" />
+          <p className="text-xs text-[var(--color-error)]">{error}</p>
+        </div>
+      )}
+
+      {success && (
+        <div className="mt-3 p-2 rounded bg-[var(--color-success)]/10 flex items-center gap-2">
+          <Check className="w-4 h-4 text-[var(--color-success)]" />
+          <p className="text-xs text-[var(--color-success)]">Request accepted!</p>
+        </div>
+      )}
+
+      {!success && (
+        <div className="mt-3 flex gap-2">
+          <Button
+            onClick={handleAccept}
+            disabled={isAccepting || isDenying}
+            className="flex-1"
+          >
+            {isAccepting ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Accepting...
+              </>
+            ) : (
+              <>
+                <MessageSquare className="w-4 h-4 mr-2" />
+                Accept
+              </>
+            )}
+          </Button>
+          <Button
+            onClick={handleDeny}
+            disabled={isAccepting || isDenying}
+            variant="secondary"
+          >
+            {isDenying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <XCircle className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// Welcome Card (Group invite)
+// ============================================================================
+
 interface WelcomeCardProps {
   welcome: PendingWelcome;
   isProcessing: boolean;
-  onAccepted: () => void;
+  onHandled: () => void;
 }
 
-function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
+function WelcomeCard({ welcome, isProcessing, onHandled }: WelcomeCardProps) {
   const setProcessingWelcome = useGroupStore((s) => s.setProcessingWelcome);
   const removePendingWelcome = useGroupStore((s) => s.removePendingWelcome);
   const addJoinedGroup = useGroupStore((s) => s.addJoinedGroup);
@@ -104,6 +286,7 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
 
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [isDenying, setIsDenying] = useState(false);
 
   const handleAccept = async () => {
     setError(null);
@@ -136,12 +319,27 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
       // Navigate to the group after a brief delay
       setTimeout(() => {
         setActiveConversation(welcome.groupId);
-        onAccepted();
+        onHandled();
       }, 500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept invite');
+      setError(extractError(err, 'Failed to accept invite'));
     } finally {
       setProcessingWelcome(welcome.id, false);
+    }
+  };
+
+  const handleDeny = async () => {
+    setError(null);
+    setIsDenying(true);
+
+    try {
+      await api.denyWelcome(welcome.id);
+      removePendingWelcome(welcome.id);
+      onHandled();
+    } catch (err) {
+      setError(extractError(err, 'Failed to deny invite'));
+    } finally {
+      setIsDenying(false);
     }
   };
 
@@ -177,11 +375,11 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
       )}
 
       {!success && (
-        <div className="mt-3">
+        <div className="mt-3 flex gap-2">
           <Button
             onClick={handleAccept}
-            disabled={isProcessing}
-            className="w-full"
+            disabled={isProcessing || isDenying}
+            className="flex-1"
           >
             {isProcessing ? (
               <>
@@ -193,6 +391,17 @@ function WelcomeCard({ welcome, isProcessing, onAccepted }: WelcomeCardProps) {
                 <Users className="w-4 h-4 mr-2" />
                 Accept Invite
               </>
+            )}
+          </Button>
+          <Button
+            onClick={handleDeny}
+            disabled={isProcessing || isDenying}
+            variant="secondary"
+          >
+            {isDenying ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <XCircle className="w-4 h-4" />
             )}
           </Button>
         </div>

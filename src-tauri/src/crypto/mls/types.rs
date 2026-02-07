@@ -45,7 +45,9 @@ pub struct ConversationInfo {
     pub conversation_type: ConversationType,
     pub participants: u32,
     pub welcome_message: Option<Vec<u8>>, // For inviting others
+    pub commit_message: Option<Vec<u8>>,  // Serialized Commit for deferred application
     pub group_info: MlsGroupInfo,
+    pub ratchet_tree: Option<Vec<u8>>, // Exported tree for Welcome recipient
 }
 
 /// Type of conversation

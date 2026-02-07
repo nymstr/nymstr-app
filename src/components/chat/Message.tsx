@@ -99,8 +99,6 @@ export function Message({
 
   const direction: MessageDirection = isOwn ? 'outgoing' : 'incoming';
   const shouldShowAvatar = showAvatar && (position === 'single' || position === 'last');
-  const avatarSpacer = showAvatar && !shouldShowAvatar;
-
   return (
     <div
       className={cn(

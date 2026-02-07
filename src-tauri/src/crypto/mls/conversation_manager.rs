@@ -134,50 +134,6 @@ impl MlsConversationManager {
         self.mls_storage_path = mls_storage_path;
     }
 
-    /// Handle incoming key package request for MLS handshake
-    pub async fn handle_key_package_request(
-        &mut self,
-        sender: &str,
-        _sender_key_package: &str,
-    ) -> Result<()> {
-        info!("Handling key package request from: {}", sender);
-
-        // Create MLS client for this conversation
-        let client = self.create_mls_client()?;
-
-        // Generate our key package in response
-        let our_key_package = client.generate_key_package()?;
-
-        // Create conversation ID (consistent ordering)
-        let user = self.current_user.as_deref().unwrap_or("");
-        let _conversation_id = if user < sender {
-            format!("{}-{}", user, sender)
-        } else {
-            format!("{}-{}", sender, user)
-        };
-
-        // Sign our key package for authenticity
-        let signature = if let (Some(secret_key), Some(passphrase)) =
-            (&self.pgp_secret_key, &self.pgp_passphrase)
-        {
-            PgpSigner::sign_detached_secure(secret_key, &our_key_package, passphrase)?
-        } else {
-            return Err(anyhow!("PGP keys not available for signing"));
-        };
-
-        // Convert key package to base64 for transmission
-        let our_key_package_b64 =
-            base64::engine::general_purpose::STANDARD.encode(&our_key_package);
-
-        // Send key package response back to sender
-        self.service
-            .send_key_package_response(user, sender, "", &our_key_package_b64, &signature)
-            .await?;
-
-        info!("Sent key package response to: {}", sender);
-        Ok(())
-    }
-
     /// Handle incoming group welcome message
     pub async fn handle_group_welcome(
         &mut self,
@@ -230,56 +186,32 @@ impl MlsConversationManager {
         Ok(())
     }
 
-    /// Establish MLS conversation with a recipient
-    pub async fn establish_conversation(&mut self, recipient: &str) -> Result<()> {
-        info!("Establishing MLS conversation with: {}", recipient);
-
-        // Create MLS client
-        let client = self.create_mls_client()?;
-
-        // Generate our key package for the handshake
-        let our_key_package = client.generate_key_package()?;
-
-        // Sign our key package for authenticity
-        let signature = if let (Some(secret_key), Some(passphrase)) =
-            (&self.pgp_secret_key, &self.pgp_passphrase)
-        {
-            PgpSigner::sign_detached_secure(secret_key, &our_key_package, passphrase)?
-        } else {
-            return Err(anyhow!("PGP keys not available for signing"));
-        };
-
-        // Convert key package to base64 for transmission
-        let our_key_package_b64 =
-            base64::engine::general_purpose::STANDARD.encode(&our_key_package);
-        let user = self.current_user.as_deref().unwrap_or("");
-
-        // Send key package request to recipient
-        self.service
-            .send_key_package_request(user, recipient, &our_key_package_b64, &signature)
-            .await?;
-
-        info!("Sent key package request to: {}", recipient);
-        Ok(())
-    }
-
-    /// Check if conversation exists with recipient
+    /// Check if conversation exists with recipient using DB-backed MLS group ID lookup
     #[allow(dead_code)]
     pub async fn conversation_exists(&self, recipient: &str) -> Result<bool> {
         let user = self.current_user.as_deref().unwrap_or("");
-        let conversation_id = if user < recipient {
-            format!("{}-{}", user, recipient)
-        } else {
-            format!("{}-{}", recipient, user)
-        };
+        let mut parts = vec![user, recipient];
+        parts.sort();
+        let conversation_id = format!("dm:{}:{}", parts[0], parts[1]);
 
-        // Try to create MLS client and check if group exists
-        if let Ok(client) = self.create_mls_client() {
-            let conv_id_bytes = conversation_id.as_bytes();
-            Ok(client.group_exists(conv_id_bytes))
-        } else {
-            Ok(false)
+        // Look up the real MLS group ID from the database
+        let result: Option<(String,)> = sqlx::query_as(
+            "SELECT mls_group_id FROM conversations WHERE id = ?"
+        )
+        .bind(&conversation_id)
+        .fetch_optional(&self.db)
+        .await
+        .ok()
+        .flatten();
+
+        if let Some((mls_group_id_b64,)) = result {
+            if let Ok(mls_group_id) = base64::engine::general_purpose::STANDARD.decode(&mls_group_id_b64) {
+                if let Ok(client) = self.create_mls_client() {
+                    return Ok(client.group_exists(&mls_group_id));
+                }
+            }
         }
+        Ok(false)
     }
 
     // ========== Epoch-Aware Buffered Processing ==========
@@ -665,6 +597,29 @@ impl MlsConversationManager {
                     &group_server_address,
                 )
                 .await?;
+
+            // Send Commit to group server for distribution to existing members
+            let commit_signature = PgpSigner::sign_detached_secure(
+                secret_key,
+                format!("{}:{}", conversation_id, add_result.welcome.epoch).as_bytes(),
+                passphrase,
+            )?;
+
+            self.service
+                .buffer_commit_on_server(
+                    user,
+                    conversation_id,
+                    add_result.welcome.epoch as i64,
+                    &add_result.commit_bytes,
+                    &commit_signature,
+                    &group_server_address,
+                )
+                .await?;
+
+            info!(
+                "Sent Commit to group server {} for epoch {}",
+                group_server_address, add_result.welcome.epoch
+            );
         }
 
         info!(
@@ -773,19 +728,19 @@ mod tests {
         let user1 = "alice";
         let user2 = "bob";
 
-        let id1 = if user1 < user2 {
-            format!("{}-{}", user1, user2)
-        } else {
-            format!("{}-{}", user2, user1)
+        let id1 = {
+            let mut parts = vec![user1, user2];
+            parts.sort();
+            format!("dm:{}:{}", parts[0], parts[1])
         };
 
-        let id2 = if user2 < user1 {
-            format!("{}-{}", user2, user1)
-        } else {
-            format!("{}-{}", user1, user2)
+        let id2 = {
+            let mut parts = vec![user2, user1];
+            parts.sort();
+            format!("dm:{}:{}", parts[0], parts[1])
         };
 
         assert_eq!(id1, id2);
-        assert_eq!(id1, "alice-bob");
+        assert_eq!(id1, "dm:alice:bob");
     }
 }

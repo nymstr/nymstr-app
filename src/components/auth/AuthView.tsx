@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Lock, User, Key, Eye, EyeOff, Loader2, Server, Settings } from 'lucide-react';
+import { Lock, User, Key, Eye, EyeOff, Server, Settings } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { cn } from '../ui/utils';
 import { ProgressStepper } from '../ui/ProgressStepper';

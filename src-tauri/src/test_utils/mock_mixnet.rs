@@ -217,6 +217,11 @@ impl MixnetSender for MockMixnetService {
         self.send_to_server(&msg).await
     }
 
+    async fn send_ack(&self, username: &str, pending_ids: &[i64]) -> Result<()> {
+        let msg = MixnetMessage::ack(username, pending_ids);
+        self.send_to_server(&msg).await
+    }
+
     async fn send_message_via_server(
         &self,
         sender: &str,
@@ -263,10 +268,9 @@ impl MixnetSender for MockMixnetService {
         &self,
         sender: &str,
         recipient: &str,
-        sender_key_package: &str,
         signature: &str,
     ) -> Result<()> {
-        let msg = MixnetMessage::key_package_request(sender, recipient, sender_key_package, signature);
+        let msg = MixnetMessage::key_package_request(sender, recipient, signature);
         self.send_to_server(&msg).await
     }
 
@@ -294,20 +298,20 @@ impl MixnetSender for MockMixnetService {
         recipient: &str,
         welcome_b64: &str,
         group_id: &str,
+        commit_b64: Option<&str>,
+        ratchet_tree_b64: Option<&str>,
         signature: &str,
     ) -> Result<()> {
-        let payload = serde_json::json!({
-            "type": "system",
-            "action": "p2pWelcome",
-            "sender": sender,
-            "recipient": recipient,
-            "payload": {
-                "welcomeMessage": welcome_b64,
-                "groupId": group_id
-            },
-            "signature": signature,
-            "timestamp": chrono::Utc::now().to_rfc3339()
+        let mut payload_inner = serde_json::json!({
+            "welcomeMessage": welcome_b64,
+            "groupId": group_id
         });
+        if let Some(commit) = commit_b64 {
+            payload_inner["commitMessage"] = serde_json::json!(commit);
+        }
+        if let Some(rt) = ratchet_tree_b64 {
+            payload_inner["ratchetTree"] = serde_json::json!(rt);
+        }
         let server = self.server_address.read().await;
         let server_addr = server.as_deref().unwrap_or("server");
 
@@ -317,12 +321,24 @@ impl MixnetSender for MockMixnetService {
             action: "p2pWelcome".into(),
             sender: sender.into(),
             recipient: recipient.into(),
-            payload: payload["payload"].clone(),
+            payload: payload_inner,
             signature: signature.into(),
             timestamp: chrono::Utc::now().to_rfc3339(),
         };
         self.record_send(server_addr, msg, None).await;
         Ok(())
+    }
+
+    async fn send_p2p_welcome_ack(
+        &self,
+        sender: &str,
+        recipient: &str,
+        conversation_id: &str,
+        accepted: bool,
+        signature: &str,
+    ) -> Result<()> {
+        let msg = MixnetMessage::p2p_welcome_ack(sender, recipient, conversation_id, accepted, signature);
+        self.send_to_server(&msg).await
     }
 
     async fn send_group_join_response(
