@@ -23,6 +23,7 @@ pub enum AppEvent {
     MessageReceived {
         #[serde(flatten)]
         message: MessageDTO,
+        #[serde(rename = "conversationId")]
         conversation_id: String,
     },
 
