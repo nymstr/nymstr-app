@@ -319,13 +319,14 @@ pub async fn send_group_message(
         timestamp: Utc::now().to_rfc3339(),
         status: MessageStatus::Sent,
         is_own: true,
+        is_read: true,
     };
 
     // Store locally
     sqlx::query(
         r#"
-        INSERT INTO messages (id, conversation_id, sender, content, timestamp, status, is_own)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, conversation_id, sender, content, timestamp, status, is_own, is_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&message.id)
@@ -334,6 +335,7 @@ pub async fn send_group_message(
     .bind(&message.content)
     .bind(&message.timestamp)
     .bind("sent")
+    .bind(true)
     .bind(true)
     .execute(&state.db)
     .await
@@ -453,12 +455,12 @@ pub async fn fetch_group_messages(
     // The new messages will be received via the message router and stored
     let limit = limit.unwrap_or(50).min(100);
 
-    let messages: Vec<(String, String, String, String, String, bool)> = if let Some(before) =
+    let messages: Vec<(String, String, String, String, String, bool, bool)> = if let Some(before) =
         before_id
     {
         sqlx::query_as(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ? AND id < ?
             ORDER BY timestamp DESC
@@ -474,7 +476,7 @@ pub async fn fetch_group_messages(
     } else {
         sqlx::query_as(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ?
             ORDER BY timestamp DESC
@@ -490,7 +492,7 @@ pub async fn fetch_group_messages(
 
     let mut result: Vec<MessageDTO> = messages
         .into_iter()
-        .map(|(id, sender, content, timestamp, status, is_own)| MessageDTO {
+        .map(|(id, sender, content, timestamp, status, is_own, is_read)| MessageDTO {
             id,
             sender,
             content,
@@ -499,10 +501,10 @@ pub async fn fetch_group_messages(
                 "pending" => MessageStatus::Pending,
                 "sent" => MessageStatus::Sent,
                 "delivered" => MessageStatus::Delivered,
-                "read" => MessageStatus::Read,
                 _ => MessageStatus::Failed,
             },
             is_own,
+            is_read,
         })
         .collect();
 
@@ -751,33 +753,23 @@ pub async fn set_mls_group_id(
 pub async fn get_pending_welcomes(
     state: State<'_, AppState>,
 ) -> Result<Vec<serde_json::Value>, ApiError> {
-    let welcomes: Vec<(i64, String, String, String, i64, i64, String)> = sqlx::query_as(
-        r#"
-        SELECT id, group_id, sender, welcome_bytes, cipher_suite, epoch, received_at
-        FROM pending_welcomes
-        WHERE processed = 0
-        ORDER BY received_at ASC
-        "#,
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let welcomes = crate::core::db::MlsDb::get_pending_welcomes(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     let result: Vec<serde_json::Value> = welcomes
         .into_iter()
-        .map(
-            |(id, group_id, sender, welcome_bytes, cipher_suite, epoch, received_at)| {
-                serde_json::json!({
-                    "id": id,
-                    "groupId": group_id,
-                    "sender": sender,
-                    "welcomeBytes": welcome_bytes,
-                    "cipherSuite": cipher_suite,
-                    "epoch": epoch,
-                    "receivedAt": received_at
-                })
-            },
-        )
+        .map(|w| {
+            serde_json::json!({
+                "id": w.id,
+                "groupId": w.group_id,
+                "sender": w.sender,
+                "welcomeBytes": w.welcome_bytes,
+                "cipherSuite": w.cipher_suite,
+                "epoch": w.epoch,
+                "receivedAt": w.received_at
+            })
+        })
         .collect();
 
     Ok(result)
@@ -800,21 +792,22 @@ pub async fn process_welcome(welcome_id: i64, state: State<'_, AppState>) -> Res
         .await
         .ok_or_else(|| ApiError::internal("PGP keys not available"))?;
 
-    // Get the welcome from database
-    let welcome: Option<(String, String, String, Option<String>, i64, i64)> = sqlx::query_as(
-        r#"
-        SELECT group_id, sender, welcome_bytes, ratchet_tree, cipher_suite, epoch
-        FROM pending_welcomes
-        WHERE id = ? AND processed = 0
-        "#,
-    )
-    .bind(welcome_id)
-    .fetch_optional(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    // Get pending welcomes and find the one we need
+    let welcomes = crate::core::db::MlsDb::get_pending_welcomes(&state.db)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    let (group_id, sender, welcome_bytes, ratchet_tree, cipher_suite, epoch) =
-        welcome.ok_or_else(|| ApiError::not_found("Welcome not found or already processed"))?;
+    let stored_welcome = welcomes
+        .into_iter()
+        .find(|w| w.id == welcome_id)
+        .ok_or_else(|| ApiError::not_found("Welcome not found or already processed"))?;
+
+    let group_id = stored_welcome.group_id;
+    let sender = stored_welcome.sender;
+    let welcome_bytes = stored_welcome.welcome_bytes;
+    let ratchet_tree = stored_welcome.ratchet_tree;
+    let cipher_suite = stored_welcome.cipher_suite;
+    let epoch = stored_welcome.epoch;
 
     // Create MLS client
     let mls_client = MlsClient::new(
@@ -841,10 +834,10 @@ pub async fn process_welcome(welcome_id: i64, state: State<'_, AppState>) -> Res
     // Create MlsWelcome struct
     let mls_welcome = crate::crypto::mls::MlsWelcome::new(
         &group_id,
-        cipher_suite as u16,
+        cipher_suite,
         &welcome_bytes_decoded,
         ratchet_tree_decoded.as_deref(),
-        epoch as u64,
+        epoch,
         &sender,
     );
 
@@ -855,13 +848,9 @@ pub async fn process_welcome(welcome_id: i64, state: State<'_, AppState>) -> Res
         .map_err(|e| ApiError::internal(format!("Failed to process welcome: {}", e)))?;
 
     // Mark as processed
-    sqlx::query(
-        "UPDATE pending_welcomes SET processed = 1, processed_at = datetime('now') WHERE id = ?",
-    )
-    .bind(welcome_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    crate::core::db::MlsDb::mark_welcome_processed(&state.db, welcome_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     // Find the group server address (try to find by group_id match)
     // This assumes the group_id in the welcome corresponds to a known server

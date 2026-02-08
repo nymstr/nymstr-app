@@ -22,6 +22,7 @@ export function useMessageSend(conversationId: string, conversationType: Convers
       timestamp: new Date().toISOString(),
       status: 'pending',
       isOwn: true,
+      isRead: true,
     };
 
     // 2. Add to UI immediately

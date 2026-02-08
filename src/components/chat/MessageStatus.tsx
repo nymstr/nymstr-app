@@ -13,7 +13,6 @@ export function MessageStatus({ status, onRetry }: MessageStatusProps) {
     encrypting: { icon: Lock, color: 'text-[var(--color-text-muted)]', label: 'Encrypting' },
     sent: { icon: Check, color: 'text-[var(--color-text-muted)]', label: 'Sent' },
     delivered: { icon: CheckCheck, color: 'text-[var(--color-text-muted)]', label: 'Delivered' },
-    read: { icon: CheckCheck, color: 'text-[var(--color-accent)]', label: 'Read' },
     failed: { icon: AlertCircle, color: 'text-[var(--color-error)]', label: 'Failed' },
   };
 

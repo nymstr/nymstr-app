@@ -29,7 +29,7 @@ pub async fn get_contacts(
 
     // Count unread incoming messages per conversation in one query
     let unread_rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT conversation_id, COUNT(*) FROM messages WHERE is_own = 0 AND status != 'read' GROUP BY conversation_id"
+        "SELECT conversation_id, COUNT(*) FROM messages WHERE is_own = 0 AND is_read = 0 GROUP BY conversation_id"
     )
     .fetch_all(&state.db)
     .await

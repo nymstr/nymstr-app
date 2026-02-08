@@ -217,8 +217,8 @@ async fn handle_mls_message(
             // The initiator no longer sends their own KP — only a signed request
             sqlx::query(
                 r#"
-                INSERT OR REPLACE INTO contact_requests (from_username, key_package, received_at, status)
-                VALUES (?, '', datetime('now'), 'pending')
+                INSERT OR REPLACE INTO contact_requests (from_username, received_at, status)
+                VALUES (?, datetime('now'), 'pending')
                 "#,
             )
             .bind(sender)
@@ -417,6 +417,7 @@ async fn handle_encrypted_message(
                 timestamp: incoming.ts.to_rfc3339(),
                 status: MessageStatus::Delivered,
                 is_own: false,
+                is_read: false,
             };
 
             // Store in database

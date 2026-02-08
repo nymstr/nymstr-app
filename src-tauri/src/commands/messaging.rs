@@ -10,6 +10,7 @@ use chrono::Utc;
 use tauri::State;
 use uuid::Uuid;
 
+use crate::core::db::Db;
 use crate::core::message_handler::{DirectMessageHandler, normalize_conversation_id};
 use crate::state::AppState;
 use crate::types::{ApiError, MessageDTO, MessageStatus};
@@ -64,14 +65,15 @@ pub async fn send_message(
         timestamp: Utc::now().to_rfc3339(),
         status: MessageStatus::Pending,
         is_own: true,
+        is_read: true,
     };
 
     // Store message locally with pending status
     let conversation_id = normalize_conversation_id(&current_user.username, &recipient);
     sqlx::query(
         r#"
-        INSERT INTO messages (id, conversation_id, sender, content, timestamp, status, is_own)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO messages (id, conversation_id, sender, content, timestamp, status, is_own, is_read)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#
     )
     .bind(&message.id)
@@ -80,6 +82,7 @@ pub async fn send_message(
     .bind(&message.content)
     .bind(&message.timestamp)
     .bind("pending")
+    .bind(true)
     .bind(true)
     .execute(&state.db)
     .await
@@ -248,10 +251,10 @@ pub async fn get_conversation(
     let conversation_id = normalize_conversation_id(&current_user.username, &contact);
     let limit = limit.unwrap_or(50).min(100);
 
-    let messages: Vec<(String, String, String, String, String, bool)> = if let Some(before) = before_id {
+    let messages: Vec<(String, String, String, String, String, bool, bool)> = if let Some(before) = before_id {
         sqlx::query_as(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ? AND id < ?
             ORDER BY timestamp DESC
@@ -267,7 +270,7 @@ pub async fn get_conversation(
     } else {
         sqlx::query_as(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ?
             ORDER BY timestamp DESC
@@ -281,10 +284,15 @@ pub async fn get_conversation(
         .map_err(|e| ApiError::internal(e.to_string()))?
     };
 
+    // Mark all incoming messages in this conversation as read
+    Db::mark_conversation_read(&state.db, &conversation_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+
     // Convert to DTOs and reverse to get chronological order
     let mut result: Vec<MessageDTO> = messages
         .into_iter()
-        .map(|(id, sender, content, timestamp, status, is_own)| {
+        .map(|(id, sender, content, timestamp, status, is_own, _is_read)| {
             MessageDTO {
                 id,
                 sender,
@@ -294,10 +302,10 @@ pub async fn get_conversation(
                     "pending" => MessageStatus::Pending,
                     "sent" => MessageStatus::Sent,
                     "delivered" => MessageStatus::Delivered,
-                    "read" => MessageStatus::Read,
                     _ => MessageStatus::Failed,
                 },
                 is_own,
+                is_read: true, // Just marked as read above
             }
         })
         .collect();
@@ -313,7 +321,8 @@ pub async fn mark_as_read(
     message_id: String,
     state: State<'_, AppState>,
 ) -> Result<(), ApiError> {
-    // Get current user for normalized conversation ID
+    let _ = message_id; // Reserved for future per-message granularity
+
     let current_user = state
         .get_current_user()
         .await
@@ -321,21 +330,9 @@ pub async fn mark_as_read(
 
     let conversation_id = normalize_conversation_id(&current_user.username, &contact);
 
-    // Update all messages up to and including this one as read
-    sqlx::query(
-        r#"
-        UPDATE messages
-        SET status = 'read'
-        WHERE conversation_id = ? AND timestamp <= (
-            SELECT timestamp FROM messages WHERE id = ?
-        ) AND is_own = 0
-        "#
-    )
-    .bind(&conversation_id)
-    .bind(&message_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    Db::mark_conversation_read(&state.db, &conversation_id)
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -408,6 +405,7 @@ pub async fn get_pending_messages(
                 timestamp,
                 status: MessageStatus::Pending,
                 is_own,
+                is_read: false,
             }
         })
         .collect();

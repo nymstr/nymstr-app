@@ -313,3 +313,40 @@ impl EventEmitter {
         self.emit(AppEvent::BackgroundTasksStopped);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::MessageStatus;
+
+    #[test]
+    fn test_message_received_serialization() {
+        let event = AppEvent::MessageReceived {
+            message: MessageDTO {
+                id: "test-id".to_string(),
+                sender: "terry10".to_string(),
+                content: "yoooo".to_string(),
+                timestamp: "2026-02-07T00:00:00Z".to_string(),
+                status: MessageStatus::Delivered,
+                is_own: false,
+                is_read: false,
+            },
+            conversation_id: "dm:raider:terry10".to_string(),
+        };
+
+        let json = serde_json::to_value(&event).unwrap();
+
+        // Check adjacently-tagged envelope
+        assert_eq!(json["type"], "MessageReceived");
+
+        // Check payload has flattened MessageDTO fields + conversationId
+        let payload = &json["payload"];
+        assert_eq!(payload["id"], "test-id");
+        assert_eq!(payload["sender"], "terry10");
+        assert_eq!(payload["content"], "yoooo");
+        assert_eq!(payload["status"], "delivered");
+        assert_eq!(payload["isOwn"], false);
+        assert_eq!(payload["isRead"], false);
+        assert_eq!(payload["conversationId"], "dm:raider:terry10");
+    }
+}

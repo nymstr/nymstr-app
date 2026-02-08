@@ -23,7 +23,6 @@ pub struct GroupServer {
     pub server_address: String,
     pub mls_group_id: Option<String>,
     pub group_name: Option<String>,
-    pub last_cursor: i64,
     pub joined_at: String,
 }
 
@@ -195,14 +194,13 @@ impl GroupDb {
         sqlx::query(
             r#"
             INSERT OR REPLACE INTO group_servers
-            (server_address, mls_group_id, group_name, last_cursor, joined_at)
-            VALUES (?, ?, ?, ?, ?)
+            (server_address, mls_group_id, group_name, joined_at)
+            VALUES (?, ?, ?, ?)
             "#,
         )
         .bind(&server.server_address)
         .bind(&server.mls_group_id)
         .bind(&server.group_name)
-        .bind(server.last_cursor)
         .bind(&server.joined_at)
         .execute(pool)
         .await?;
@@ -215,7 +213,7 @@ impl GroupDb {
     pub async fn get_group_servers(pool: &SqlitePool) -> Result<Vec<GroupServer>> {
         let rows = sqlx::query(
             r#"
-            SELECT server_address, mls_group_id, group_name, last_cursor, joined_at
+            SELECT server_address, mls_group_id, group_name, joined_at
             FROM group_servers
             ORDER BY joined_at DESC
             "#,
@@ -229,7 +227,6 @@ impl GroupDb {
                 server_address: r.try_get("server_address")?,
                 mls_group_id: r.try_get("mls_group_id")?,
                 group_name: r.try_get("group_name")?,
-                last_cursor: r.try_get("last_cursor")?,
                 joined_at: r.try_get("joined_at")?,
             });
         }
@@ -243,7 +240,7 @@ impl GroupDb {
     ) -> Result<Option<GroupServer>> {
         let row = sqlx::query(
             r#"
-            SELECT server_address, mls_group_id, group_name, last_cursor, joined_at
+            SELECT server_address, mls_group_id, group_name, joined_at
             FROM group_servers
             WHERE server_address = ?
             "#,
@@ -257,26 +254,10 @@ impl GroupDb {
                 server_address: r.try_get("server_address")?,
                 mls_group_id: r.try_get("mls_group_id")?,
                 group_name: r.try_get("group_name")?,
-                last_cursor: r.try_get("last_cursor")?,
                 joined_at: r.try_get("joined_at")?,
             })),
             None => Ok(None),
         }
-    }
-
-    /// Update the cursor for a group server
-    pub async fn update_group_cursor(
-        pool: &SqlitePool,
-        server_address: &str,
-        cursor: i64,
-    ) -> Result<()> {
-        sqlx::query("UPDATE group_servers SET last_cursor = ? WHERE server_address = ?")
-            .bind(cursor)
-            .bind(server_address)
-            .execute(pool)
-            .await?;
-
-        Ok(())
     }
 
     /// Get MLS group ID by server address
@@ -733,77 +714,24 @@ impl GroupDb {
 
     // ========== Conversations ==========
 
-    /// Create a conversation
+    /// Create a conversation (DM conversation → MLS group ID mapping)
     pub async fn create_conversation(
         pool: &SqlitePool,
         id: &str,
-        conv_type: &str, // 'direct' or 'group'
-        participant: Option<&str>,
-        group_address: Option<&str>,
         mls_group_id: Option<&str>,
     ) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO conversations
-            (id, type, participant, group_address, mls_group_id)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO conversations (id, mls_group_id)
+            VALUES (?, ?)
             "#,
         )
         .bind(id)
-        .bind(conv_type)
-        .bind(participant)
-        .bind(group_address)
         .bind(mls_group_id)
         .execute(pool)
         .await?;
 
-        tracing::debug!("Created conversation: {} (type: {})", id, conv_type);
-        Ok(())
-    }
-
-    /// Get a conversation by ID
-    #[allow(dead_code)]
-    pub async fn get_conversation(
-        pool: &SqlitePool,
-        id: &str,
-    ) -> Result<Option<(String, String, Option<String>, Option<String>, Option<String>)>> {
-        let row = sqlx::query(
-            "SELECT id, type, participant, group_address, mls_group_id FROM conversations WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-
-        match row {
-            Some(r) => Ok(Some((
-                r.try_get("id")?,
-                r.try_get("type")?,
-                r.try_get("participant")?,
-                r.try_get("group_address")?,
-                r.try_get("mls_group_id")?,
-            ))),
-            None => Ok(None),
-        }
-    }
-
-    /// Update last message timestamp for a conversation
-    pub async fn update_conversation_last_message(pool: &SqlitePool, id: &str) -> Result<()> {
-        sqlx::query("UPDATE conversations SET last_message_at = datetime('now') WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// Delete a conversation
-    #[allow(dead_code)]
-    pub async fn delete_conversation(pool: &SqlitePool, id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM conversations WHERE id = ?")
-            .bind(id)
-            .execute(pool)
-            .await?;
-
+        tracing::debug!("Created conversation: {}", id);
         Ok(())
     }
 }
@@ -840,7 +768,6 @@ mod tests {
                 server_address TEXT PRIMARY KEY,
                 mls_group_id TEXT,
                 group_name TEXT,
-                last_cursor INTEGER DEFAULT 0,
                 joined_at TEXT DEFAULT (datetime('now'))
             )
             "#,
@@ -885,12 +812,7 @@ mod tests {
             r#"
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
-                type TEXT NOT NULL,
-                participant TEXT,
-                group_address TEXT,
-                mls_group_id TEXT,
-                created_at TEXT DEFAULT (datetime('now')),
-                last_message_at TEXT
+                mls_group_id TEXT
             )
             "#,
         )
@@ -923,7 +845,6 @@ mod tests {
             server_address: "server1".to_string(),
             mls_group_id: Some("group1".to_string()),
             group_name: Some("Test Group".to_string()),
-            last_cursor: 0,
             joined_at: chrono::Utc::now().to_rfc3339(),
         };
 
@@ -934,15 +855,6 @@ mod tests {
         let retrieved = retrieved.unwrap();
         assert_eq!(retrieved.server_address, "server1");
         assert_eq!(retrieved.mls_group_id, Some("group1".to_string()));
-
-        GroupDb::update_group_cursor(&pool, "server1", 10)
-            .await
-            .unwrap();
-        let updated = GroupDb::get_group_server(&pool, "server1")
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(updated.last_cursor, 10);
     }
 
     #[tokio::test]

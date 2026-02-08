@@ -58,6 +58,7 @@ export function GroupChatWindow({ conversation }: GroupChatWindowProps) {
       timestamp: new Date().toISOString(),
       status: 'pending',
       isOwn: true,
+      isRead: true,
     };
     setMessages((prev) => [...prev, optimisticMessage]);
 

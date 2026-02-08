@@ -63,7 +63,8 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
             content TEXT NOT NULL,
             timestamp TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'pending',
-            is_own INTEGER NOT NULL DEFAULT 0
+            is_own INTEGER NOT NULL DEFAULT 0,
+            is_read INTEGER NOT NULL DEFAULT 0
         )
         "#,
     )
@@ -167,7 +168,6 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
             server_address TEXT PRIMARY KEY,
             mls_group_id TEXT,
             group_name TEXT,
-            last_cursor INTEGER DEFAULT 0,
             joined_at TEXT DEFAULT (datetime('now'))
         )
         "#,
@@ -207,38 +207,14 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
-    // Group info table - published GroupInfo for external joins
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS group_info (
-            group_id TEXT PRIMARY KEY,
-            mls_group_id TEXT,
-            epoch INTEGER NOT NULL,
-            tree_hash BLOB NOT NULL,
-            group_info_bytes BLOB NOT NULL,
-            external_pub BLOB,
-            created_by TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            updated_at TEXT DEFAULT (datetime('now'))
-        )
-        "#,
-    )
-    .execute(db)
-    .await?;
-
     // ========== Conversation Tables ==========
 
-    // Conversations table - unified view of DMs and groups
+    // Conversations table - DM conversation → MLS group ID mapping
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS conversations (
             id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
-            participant TEXT,
-            group_address TEXT,
-            mls_group_id TEXT,
-            created_at TEXT DEFAULT (datetime('now')),
-            last_message_at TEXT
+            mls_group_id TEXT
         )
         "#,
     )
@@ -296,29 +272,7 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(db)
     .await?;
 
-    // Group welcomes table - pending welcomes to process
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS group_welcomes (
-            id INTEGER PRIMARY KEY,
-            group_id TEXT,
-            sender TEXT,
-            welcome_bytes BLOB,
-            ratchet_tree BLOB,
-            cipher_suite INTEGER,
-            epoch INTEGER,
-            received_at TEXT,
-            processed INTEGER DEFAULT 0,
-            processed_at TEXT,
-            error_message TEXT
-        )
-        "#,
-    )
-    .execute(db)
-    .await?;
-
-    // Pending welcomes table - alternative storage for welcome messages
-    // Used by group commands for welcome processing
+    // Pending welcomes table - MLS welcome message processing
     sqlx::query(
         r#"
         CREATE TABLE IF NOT EXISTS pending_welcomes (
@@ -358,7 +312,6 @@ async fn create_tables(db: &SqlitePool) -> Result<(), sqlx::Error> {
         CREATE TABLE IF NOT EXISTS contact_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             from_username TEXT NOT NULL,
-            key_package TEXT NOT NULL,
             received_at TEXT NOT NULL DEFAULT (datetime('now')),
             status TEXT NOT NULL DEFAULT 'pending',
             UNIQUE(from_username)
@@ -396,13 +349,13 @@ async fn create_indexes(db: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(db)
         .await?;
 
-    // Pending MLS messages index
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pending_mls_conv_processed ON pending_mls_messages(conversation_id, processed)")
+    // Message read status index (for unread counts)
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_messages_unread ON messages(conversation_id, is_own, is_read)")
         .execute(db)
         .await?;
 
-    // Group welcomes index
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_group_welcomes_pending ON group_welcomes(processed, received_at)")
+    // Pending MLS messages index
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_pending_mls_conv_processed ON pending_mls_messages(conversation_id, processed)")
         .execute(db)
         .await?;
 

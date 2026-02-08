@@ -226,11 +226,9 @@ async fn test_conversation_lifecycle() -> Result<()> {
 
     // 2. Create conversation
     sqlx::query(
-        "INSERT INTO conversations (id, type, participant, mls_group_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO conversations (id, mls_group_id) VALUES (?, ?)",
     )
     .bind("conv-alice-bob")
-    .bind("dm")
-    .bind("bob")
     .bind("mls-group-123")
     .execute(&ctx.db)
     .await?;

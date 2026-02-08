@@ -99,12 +99,11 @@ pub async fn accept_contact_request(
     // Create the conversation entry in the DB so it persists
     sqlx::query(
         r#"
-        INSERT OR IGNORE INTO conversations (id, type, participant, created_at, last_message_at)
-        VALUES (?, 'direct', ?, datetime('now'), datetime('now'))
+        INSERT OR IGNORE INTO conversations (id)
+        VALUES (?)
         "#,
     )
     .bind(&conversation_id)
-    .bind(&from_username)
     .execute(&state.db)
     .await
     .map_err(|e| ApiError::internal(e.to_string()))?;
@@ -170,24 +169,9 @@ pub async fn deny_welcome(
     welcome_id: i64,
     state: State<'_, AppState>,
 ) -> Result<(), ApiError> {
-    let rows_affected = sqlx::query(
-        r#"
-        UPDATE pending_welcomes
-        SET processed = 1, processed_at = datetime('now'), error_message = 'denied_by_user'
-        WHERE id = ? AND processed = 0
-        "#,
-    )
-    .bind(welcome_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?
-    .rows_affected();
-
-    if rows_affected == 0 {
-        return Err(ApiError::not_found(
-            "Welcome not found or already processed",
-        ));
-    }
+    crate::core::db::MlsDb::mark_welcome_failed(&state.db, welcome_id, "denied_by_user")
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?;
 
     tracing::info!("Welcome {} denied by user", welcome_id);
 

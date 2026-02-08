@@ -81,11 +81,10 @@ impl DirectMessageHandler {
         let conversation_id = normalize_conversation_id(&self.current_user, recipient);
         let mls_group_id_b64 = base64::engine::general_purpose::STANDARD.encode(mls_group_id);
         sqlx::query(
-            "INSERT OR REPLACE INTO conversations (id, type, participant, mls_group_id, created_at)
-             VALUES (?, 'direct', ?, ?, datetime('now'))"
+            "INSERT OR REPLACE INTO conversations (id, mls_group_id)
+             VALUES (?, ?)"
         )
         .bind(&conversation_id)
-        .bind(recipient)
         .bind(&mls_group_id_b64)
         .execute(&self.db).await
         .map_err(|e| anyhow!("Failed to store conversation mapping: {}", e))?;

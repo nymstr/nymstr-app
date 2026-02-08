@@ -30,8 +30,8 @@ impl MessageDb {
     pub async fn save_message(pool: &SqlitePool, conv_id: &str, msg: &MessageDTO) -> Result<()> {
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO messages (id, conversation_id, sender, content, timestamp, status, is_own)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO messages (id, conversation_id, sender, content, timestamp, status, is_own, is_read)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&msg.id)
@@ -41,6 +41,7 @@ impl MessageDb {
         .bind(&msg.timestamp)
         .bind(status_to_string(&msg.status))
         .bind(msg.is_own)
+        .bind(msg.is_read)
         .execute(pool)
         .await?;
 
@@ -56,7 +57,7 @@ impl MessageDb {
     ) -> Result<Vec<MessageDTO>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ?
             ORDER BY timestamp DESC
@@ -77,6 +78,7 @@ impl MessageDb {
                 timestamp: r.try_get("timestamp")?,
                 status: string_to_status(&r.try_get::<String, _>("status")?),
                 is_own: r.try_get("is_own")?,
+                is_read: r.try_get::<bool, _>("is_read")?,
             });
         }
 
@@ -89,7 +91,7 @@ impl MessageDb {
     pub async fn get_all_messages(pool: &SqlitePool, conv_id: &str) -> Result<Vec<MessageDTO>> {
         let rows = sqlx::query(
             r#"
-            SELECT id, sender, content, timestamp, status, is_own
+            SELECT id, sender, content, timestamp, status, is_own, is_read
             FROM messages
             WHERE conversation_id = ?
             ORDER BY timestamp ASC
@@ -108,9 +110,22 @@ impl MessageDb {
                 timestamp: r.try_get("timestamp")?,
                 status: string_to_status(&r.try_get::<String, _>("status")?),
                 is_own: r.try_get("is_own")?,
+                is_read: r.try_get::<bool, _>("is_read")?,
             });
         }
         Ok(messages)
+    }
+
+    /// Mark all incoming messages in a conversation as read
+    pub async fn mark_conversation_read(pool: &SqlitePool, conv_id: &str) -> Result<u64> {
+        let result = sqlx::query(
+            "UPDATE messages SET is_read = 1 WHERE conversation_id = ? AND is_own = 0 AND is_read = 0",
+        )
+        .bind(conv_id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected())
     }
 
     /// Update message status
@@ -306,7 +321,6 @@ fn status_to_string(status: &MessageStatus) -> &'static str {
         MessageStatus::Pending => "pending",
         MessageStatus::Sent => "sent",
         MessageStatus::Delivered => "delivered",
-        MessageStatus::Read => "read",
         MessageStatus::Failed => "failed",
     }
 }
@@ -317,7 +331,6 @@ fn string_to_status(s: &str) -> MessageStatus {
         "pending" => MessageStatus::Pending,
         "sent" => MessageStatus::Sent,
         "delivered" => MessageStatus::Delivered,
-        "read" => MessageStatus::Read,
         "failed" => MessageStatus::Failed,
         _ => MessageStatus::Pending,
     }
@@ -339,7 +352,8 @@ mod tests {
                 content TEXT NOT NULL,
                 timestamp TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending',
-                is_own INTEGER NOT NULL DEFAULT 0
+                is_own INTEGER NOT NULL DEFAULT 0,
+                is_read INTEGER NOT NULL DEFAULT 0
             )
             "#,
         )
@@ -379,6 +393,7 @@ mod tests {
             timestamp: "2026-01-18T12:00:00Z".to_string(),
             status: MessageStatus::Sent,
             is_own: true,
+            is_read: false,
         };
 
         MessageDb::save_message(&pool, "conv1", &msg).await.unwrap();

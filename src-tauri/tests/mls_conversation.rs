@@ -236,47 +236,35 @@ async fn test_conversations_storage() -> Result<()> {
 
     // Insert a DM conversation
     sqlx::query(
-        r#"
-        INSERT INTO conversations (id, type, participant, mls_group_id)
-        VALUES (?, ?, ?, ?)
-        "#,
+        "INSERT INTO conversations (id, mls_group_id) VALUES (?, ?)",
     )
     .bind("conv-dm-123")
-    .bind("dm")
-    .bind("bob")
     .bind("mls-group-456")
     .execute(&ctx.db)
     .await?;
 
     // Insert a group conversation
     sqlx::query(
-        r#"
-        INSERT INTO conversations (id, type, group_address, mls_group_id)
-        VALUES (?, ?, ?, ?)
-        "#,
+        "INSERT INTO conversations (id, mls_group_id) VALUES (?, ?)",
     )
     .bind("conv-group-789")
-    .bind("group")
-    .bind("group-server-address")
     .bind("mls-group-789")
     .execute(&ctx.db)
     .await?;
 
     // Query conversations
-    let convs: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT id, type, participant, group_address FROM conversations ORDER BY id",
+    let convs: Vec<(String, Option<String>)> = sqlx::query_as(
+        "SELECT id, mls_group_id FROM conversations ORDER BY id",
     )
     .fetch_all(&ctx.db)
     .await?;
 
     assert_eq!(convs.len(), 2);
     assert_eq!(convs[0].0, "conv-dm-123");
-    assert_eq!(convs[0].1, "dm");
-    assert_eq!(convs[0].2, Some("bob".to_string()));
+    assert_eq!(convs[0].1, Some("mls-group-456".to_string()));
 
     assert_eq!(convs[1].0, "conv-group-789");
-    assert_eq!(convs[1].1, "group");
-    assert_eq!(convs[1].3, Some("group-server-address".to_string()));
+    assert_eq!(convs[1].1, Some("mls-group-789".to_string()));
 
     Ok(())
 }

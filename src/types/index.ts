@@ -17,7 +17,7 @@ export interface Contact {
 }
 
 // Message status with all states
-export type MessageStatus = 'pending' | 'encrypting' | 'sent' | 'delivered' | 'read' | 'failed';
+export type MessageStatus = 'pending' | 'encrypting' | 'sent' | 'delivered' | 'failed';
 
 // Message direction
 export type MessageDirection = 'incoming' | 'outgoing';
@@ -34,6 +34,7 @@ export interface Message {
   timestamp: string;
   status: MessageStatus;
   isOwn: boolean;
+  isRead: boolean;
   // Optional fields for grouping
   direction?: MessageDirection;
   position?: MessagePosition;

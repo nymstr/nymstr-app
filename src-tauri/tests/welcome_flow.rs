@@ -284,43 +284,6 @@ async fn test_group_join_response_format() -> Result<()> {
     Ok(())
 }
 
-/// Test group info storage
-#[tokio::test]
-async fn test_group_info_storage() -> Result<()> {
-    let ctx = TestContext::new().await?;
-
-    // Insert group info
-    sqlx::query(
-        r#"
-        INSERT INTO group_info (group_id, mls_group_id, epoch, tree_hash, group_info_bytes, created_by, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        "#,
-    )
-    .bind("group-123")
-    .bind("mls-group-id")
-    .bind(5)
-    .bind(vec![1u8, 2, 3, 4]) // tree_hash
-    .bind(vec![5u8, 6, 7, 8]) // group_info_bytes
-    .bind("admin")
-    .bind(1706000000i64)
-    .execute(&ctx.db)
-    .await?;
-
-    // Query group info
-    let info: (String, i64, Vec<u8>) = sqlx::query_as(
-        "SELECT mls_group_id, epoch, tree_hash FROM group_info WHERE group_id = ?",
-    )
-    .bind("group-123")
-    .fetch_one(&ctx.db)
-    .await?;
-
-    assert_eq!(info.0, "mls-group-id");
-    assert_eq!(info.1, 5);
-    assert_eq!(info.2, vec![1, 2, 3, 4]);
-
-    Ok(())
-}
-
 /// Test multiple welcomes for same user
 #[tokio::test]
 async fn test_multiple_welcomes_same_user() -> Result<()> {

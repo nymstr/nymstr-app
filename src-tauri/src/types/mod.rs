@@ -27,14 +27,13 @@ pub struct ContactDTO {
     pub online: bool,
 }
 
-/// Message status
+/// Message status (delivery lifecycle only; read state tracked separately via is_read)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageStatus {
     Pending,
     Sent,
     Delivered,
-    Read,
     Failed,
 }
 
@@ -48,6 +47,7 @@ pub struct MessageDTO {
     pub timestamp: String,
     pub status: MessageStatus,
     pub is_own: bool,
+    pub is_read: bool,
 }
 
 /// Group data transfer object

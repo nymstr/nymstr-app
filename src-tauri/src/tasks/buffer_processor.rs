@@ -182,6 +182,7 @@ async fn process_conversation_buffer(
                     timestamp: msg.received_at.clone(),
                     status: MessageStatus::Delivered,
                     is_own: false,
+                    is_read: false,
                 };
 
                 // Store in database

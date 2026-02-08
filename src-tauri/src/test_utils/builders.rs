@@ -120,6 +120,7 @@ pub struct MessageDTOBuilder {
     timestamp: String,
     status: MessageStatus,
     is_own: bool,
+    is_read: bool,
 }
 
 impl MessageDTOBuilder {
@@ -132,17 +133,24 @@ impl MessageDTOBuilder {
             timestamp: chrono::Utc::now().to_rfc3339(),
             status: MessageStatus::Delivered,
             is_own: false,
+            is_read: false,
         }
     }
 
     /// Create an outgoing message builder
     pub fn outgoing() -> Self {
-        Self::new().is_own(true).status(MessageStatus::Sent)
+        Self::new().is_own(true).is_read(true).status(MessageStatus::Sent)
     }
 
     /// Create an incoming message builder
     pub fn incoming() -> Self {
-        Self::new().is_own(false).status(MessageStatus::Delivered)
+        Self::new().is_own(false).is_read(false).status(MessageStatus::Delivered)
+    }
+
+    /// Set the is_read flag
+    pub fn is_read(mut self, is_read: bool) -> Self {
+        self.is_read = is_read;
+        self
     }
 
     /// Set the message ID
@@ -190,6 +198,7 @@ impl MessageDTOBuilder {
             timestamp: self.timestamp,
             status: self.status,
             is_own: self.is_own,
+            is_read: self.is_read,
         }
     }
 }

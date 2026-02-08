@@ -1,12 +1,12 @@
 //! MLS state and credential operations
 //!
-//! This module contains methods for managing MLS group state, credentials, key packages,
-//! welcomes, and GroupInfo.
+//! This module contains methods for managing MLS group state, credentials,
+//! key packages, and welcome messages.
 
 use anyhow::Result;
 use sqlx::{Row, SqlitePool};
 
-use crate::crypto::mls::types::{MlsGroupInfoPublic, StoredWelcome};
+use crate::crypto::mls::types::StoredWelcome;
 
 /// Represents a stored MLS credential
 #[derive(Debug, Clone)]
@@ -258,29 +258,16 @@ impl MlsDb {
 
     /// Store a received Welcome message
     pub async fn save_welcome(pool: &SqlitePool, welcome: &StoredWelcome) -> Result<i64> {
-        use base64::Engine;
-
-        let welcome_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&welcome.welcome_bytes)
-            .map_err(|e| anyhow::anyhow!("Failed to decode welcome_bytes: {}", e))?;
-
-        let ratchet_tree = welcome
-            .ratchet_tree
-            .as_ref()
-            .map(|rt| base64::engine::general_purpose::STANDARD.decode(rt))
-            .transpose()
-            .map_err(|e| anyhow::anyhow!("Failed to decode ratchet_tree: {}", e))?;
-
         let result = sqlx::query(
             r#"
-            INSERT INTO group_welcomes (group_id, sender, welcome_bytes, ratchet_tree, cipher_suite, epoch, received_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO pending_welcomes (group_id, sender, welcome_bytes, ratchet_tree, cipher_suite, epoch, received_at, processed)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
             "#,
         )
         .bind(&welcome.group_id)
         .bind(&welcome.sender)
-        .bind(&welcome_bytes)
-        .bind(&ratchet_tree)
+        .bind(&welcome.welcome_bytes)
+        .bind(&welcome.ratchet_tree)
         .bind(welcome.cipher_suite as i64)
         .bind(welcome.epoch as i64)
         .bind(&welcome.received_at)
@@ -302,7 +289,7 @@ impl MlsDb {
         let rows = sqlx::query(
             r#"
             SELECT id, group_id, sender, welcome_bytes, ratchet_tree, cipher_suite, epoch, received_at, processed, processed_at, error_message
-            FROM group_welcomes
+            FROM pending_welcomes
             WHERE processed = 0
             ORDER BY received_at ASC
             "#,
@@ -310,19 +297,14 @@ impl MlsDb {
         .fetch_all(pool)
         .await?;
 
-        use base64::Engine;
         let mut welcomes = Vec::new();
         for row in rows {
-            let welcome_bytes_raw: Vec<u8> = row.try_get("welcome_bytes")?;
-            let ratchet_tree_raw: Option<Vec<u8>> = row.try_get("ratchet_tree")?;
-
             welcomes.push(StoredWelcome {
                 id: row.try_get("id")?,
                 group_id: row.try_get("group_id")?,
                 sender: row.try_get("sender")?,
-                welcome_bytes: base64::engine::general_purpose::STANDARD.encode(&welcome_bytes_raw),
-                ratchet_tree: ratchet_tree_raw
-                    .map(|rt| base64::engine::general_purpose::STANDARD.encode(&rt)),
+                welcome_bytes: row.try_get("welcome_bytes")?,
+                ratchet_tree: row.try_get("ratchet_tree")?,
                 cipher_suite: row.try_get::<i64, _>("cipher_suite")? as u16,
                 epoch: row.try_get::<i64, _>("epoch")? as u64,
                 received_at: row.try_get("received_at")?,
@@ -337,7 +319,7 @@ impl MlsDb {
     /// Mark a Welcome as processed
     pub async fn mark_welcome_processed(pool: &SqlitePool, id: i64) -> Result<()> {
         sqlx::query(
-            "UPDATE group_welcomes SET processed = 1, processed_at = datetime('now') WHERE id = ?",
+            "UPDATE pending_welcomes SET processed = 1, processed_at = datetime('now') WHERE id = ?",
         )
         .bind(id)
         .execute(pool)
@@ -351,7 +333,7 @@ impl MlsDb {
     #[allow(dead_code)]
     pub async fn mark_welcome_failed(pool: &SqlitePool, id: i64, error: &str) -> Result<()> {
         sqlx::query(
-            "UPDATE group_welcomes SET processed = 1, error_message = ?, processed_at = datetime('now') WHERE id = ?",
+            "UPDATE pending_welcomes SET processed = 1, error_message = ?, processed_at = datetime('now') WHERE id = ?",
         )
         .bind(error)
         .bind(id)
@@ -367,7 +349,7 @@ impl MlsDb {
     pub async fn cleanup_old_welcomes(pool: &SqlitePool, max_age_secs: i64) -> Result<u64> {
         let result = sqlx::query(
             r#"
-            DELETE FROM group_welcomes
+            DELETE FROM pending_welcomes
             WHERE processed = 1 AND datetime(processed_at) < datetime('now', ? || ' seconds')
             "#,
         )
@@ -376,132 +358,6 @@ impl MlsDb {
         .await?;
 
         Ok(result.rows_affected())
-    }
-
-    // ========== GroupInfo Storage ==========
-
-    /// Store published GroupInfo
-    pub async fn store_group_info(
-        pool: &SqlitePool,
-        group_id: &str,
-        group_info: &MlsGroupInfoPublic,
-    ) -> Result<()> {
-        let group_info_bytes = group_info.decode_group_info_bytes()?;
-        let external_pub = group_info.decode_external_pub()?;
-
-        sqlx::query(
-            r#"
-            INSERT OR REPLACE INTO group_info
-            (group_id, mls_group_id, epoch, tree_hash, group_info_bytes, external_pub, created_by, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            "#,
-        )
-        .bind(group_id)
-        .bind(&group_info.mls_group_id)
-        .bind(group_info.epoch as i64)
-        .bind(&group_info.tree_hash)
-        .bind(&group_info_bytes)
-        .bind(external_pub.as_deref())
-        .bind(&group_info.created_by)
-        .bind(group_info.created_at as i64)
-        .execute(pool)
-        .await?;
-
-        tracing::debug!(
-            "Stored group info for {} at epoch {}",
-            group_id,
-            group_info.epoch
-        );
-        Ok(())
-    }
-
-    /// Get GroupInfo for a group
-    pub async fn get_group_info(
-        pool: &SqlitePool,
-        group_id: &str,
-    ) -> Result<Option<MlsGroupInfoPublic>> {
-        let row = sqlx::query(
-            r#"
-            SELECT group_id, mls_group_id, epoch, tree_hash, group_info_bytes, external_pub, created_by, created_at
-            FROM group_info
-            WHERE group_id = ?
-            "#,
-        )
-        .bind(group_id)
-        .fetch_optional(pool)
-        .await?;
-
-        use base64::Engine;
-        match row {
-            Some(r) => {
-                let group_info_bytes_raw: Vec<u8> = r.try_get("group_info_bytes")?;
-                let external_pub_raw: Option<Vec<u8>> = r.try_get("external_pub")?;
-
-                Ok(Some(MlsGroupInfoPublic {
-                    group_id: r.try_get("group_id")?,
-                    mls_group_id: r
-                        .try_get::<Option<String>, _>("mls_group_id")?
-                        .unwrap_or_default(),
-                    epoch: r.try_get::<i64, _>("epoch")? as u64,
-                    tree_hash: r.try_get("tree_hash")?,
-                    group_info_bytes: base64::engine::general_purpose::STANDARD
-                        .encode(&group_info_bytes_raw),
-                    external_pub: external_pub_raw
-                        .map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
-                    created_by: r.try_get("created_by")?,
-                    created_at: r.try_get::<i64, _>("created_at")? as u64,
-                }))
-            }
-            None => Ok(None),
-        }
-    }
-
-    /// Delete GroupInfo for a group
-    #[allow(dead_code)]
-    pub async fn delete_group_info(pool: &SqlitePool, group_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM group_info WHERE group_id = ?")
-            .bind(group_id)
-            .execute(pool)
-            .await?;
-
-        Ok(())
-    }
-
-    /// List all stored GroupInfo
-    #[allow(dead_code)]
-    pub async fn list_group_info(pool: &SqlitePool) -> Result<Vec<MlsGroupInfoPublic>> {
-        let rows = sqlx::query(
-            r#"
-            SELECT group_id, mls_group_id, epoch, tree_hash, group_info_bytes, external_pub, created_by, created_at
-            FROM group_info
-            ORDER BY created_at DESC
-            "#,
-        )
-        .fetch_all(pool)
-        .await?;
-
-        use base64::Engine;
-        let mut groups = Vec::new();
-        for r in rows {
-            let group_info_bytes_raw: Vec<u8> = r.try_get("group_info_bytes")?;
-            let external_pub_raw: Option<Vec<u8>> = r.try_get("external_pub")?;
-
-            groups.push(MlsGroupInfoPublic {
-                group_id: r.try_get("group_id")?,
-                mls_group_id: r
-                    .try_get::<Option<String>, _>("mls_group_id")?
-                    .unwrap_or_default(),
-                epoch: r.try_get::<i64, _>("epoch")? as u64,
-                tree_hash: r.try_get("tree_hash")?,
-                group_info_bytes: base64::engine::general_purpose::STANDARD
-                    .encode(&group_info_bytes_raw),
-                external_pub: external_pub_raw
-                    .map(|ep| base64::engine::general_purpose::STANDARD.encode(&ep)),
-                created_by: r.try_get("created_by")?,
-                created_at: r.try_get::<i64, _>("created_at")? as u64,
-            });
-        }
-        Ok(groups)
     }
 }
 
@@ -556,27 +412,6 @@ mod tests {
                 created_at TEXT DEFAULT (datetime('now')),
                 expires_at TEXT,
                 used INTEGER DEFAULT 0
-            )
-            "#,
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS group_welcomes (
-                id INTEGER PRIMARY KEY,
-                group_id TEXT,
-                sender TEXT,
-                welcome_bytes BLOB,
-                ratchet_tree BLOB,
-                cipher_suite INTEGER,
-                epoch INTEGER,
-                received_at TEXT,
-                processed INTEGER DEFAULT 0,
-                processed_at TEXT,
-                error_message TEXT
             )
             "#,
         )

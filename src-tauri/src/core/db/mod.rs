@@ -35,7 +35,8 @@ pub use schema::run_migrations;
 pub use user::UserDb;
 
 // Re-export MLS types from crypto module
-pub use crate::crypto::mls::types::{MlsGroupInfoPublic, StoredWelcome};
+pub use crate::crypto::mls::types::StoredWelcome;
+
 
 use anyhow::Result;
 use sqlx::SqlitePool;
@@ -124,6 +125,11 @@ impl Db {
         MessageDb::get_all_messages(pool, conv_id).await
     }
 
+    /// Mark all incoming messages in a conversation as read
+    pub async fn mark_conversation_read(pool: &SqlitePool, conv_id: &str) -> Result<u64> {
+        MessageDb::mark_conversation_read(pool, conv_id).await
+    }
+
     // ========== MLS Welcome Operations ==========
 
     /// Save a welcome message
@@ -171,15 +177,6 @@ impl Db {
     /// Get all group servers
     pub async fn get_group_servers(pool: &SqlitePool) -> Result<Vec<GroupServer>> {
         GroupDb::get_group_servers(pool).await
-    }
-
-    /// Update group cursor
-    pub async fn update_group_cursor(
-        pool: &SqlitePool,
-        addr: &str,
-        cursor: i64,
-    ) -> Result<()> {
-        GroupDb::update_group_cursor(pool, addr, cursor).await
     }
 
     /// Get MLS group ID by server address
@@ -248,25 +245,6 @@ impl Db {
         MlsDb::mark_key_package_used(pool, id).await
     }
 
-    // ========== Group Info Operations ==========
-
-    /// Store group info
-    pub async fn store_group_info(
-        pool: &SqlitePool,
-        group_id: &str,
-        group_info: &MlsGroupInfoPublic,
-    ) -> Result<()> {
-        MlsDb::store_group_info(pool, group_id, group_info).await
-    }
-
-    /// Get group info
-    pub async fn get_group_info(
-        pool: &SqlitePool,
-        group_id: &str,
-    ) -> Result<Option<MlsGroupInfoPublic>> {
-        MlsDb::get_group_info(pool, group_id).await
-    }
-
     // ========== Group Membership Operations ==========
 
     /// Add a member to a group
@@ -299,22 +277,13 @@ impl Db {
 
     // ========== Conversation Operations ==========
 
-    /// Create a conversation
+    /// Create a conversation (DM conversation → MLS group ID mapping)
     pub async fn create_conversation(
         pool: &SqlitePool,
         id: &str,
-        conv_type: &str,
-        participant: Option<&str>,
-        group_address: Option<&str>,
         mls_group_id: Option<&str>,
     ) -> Result<()> {
-        GroupDb::create_conversation(pool, id, conv_type, participant, group_address, mls_group_id)
-            .await
-    }
-
-    /// Update conversation last message time
-    pub async fn update_conversation_last_message(pool: &SqlitePool, id: &str) -> Result<()> {
-        GroupDb::update_conversation_last_message(pool, id).await
+        GroupDb::create_conversation(pool, id, mls_group_id).await
     }
 
     // ========== Group Invite Operations ==========
